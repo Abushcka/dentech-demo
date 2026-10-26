@@ -93,60 +93,97 @@ function logout(silent) {
   if (!silent && S.token) fetch("/api/logout", { method: "POST", headers: { authorization: "Bearer " + S.token } });
   setToken(""); S.me = null; clearInterval(S.poll); renderLogin();
 }
+/* Вход: по коду (телефон или e-mail) · по паролю · регистрация · восстановление пароля.
+   Код по телефону шлёт бот лаборатории в Telegram (или WhatsApp лаборатории); если не к кому — просим открыть бота. */
+const L = { pub: {}, contact: "", sid: "" };
+const contactHint = () => L.pub.email ? "Телефон или e-mail" : "Номер телефона";
+const contactPh = () => L.pub.email ? "+996 555 123 456 или name@mail.com" : "+996 555 123 456";
+function codeSentNote(r) {
+  if (r.channel === "bot") return `<div class="note-box">Код пришлёт бот лаборатории. Откройте бота, нажмите <b>Start</b> и кнопку <b>«Отправить мой номер»</b> — код придёт туда.
+    <a class="btn primary" style="margin-top:10px;width:100%" target="_blank" href="https://t.me/${esc(r.bot)}?start=code">${ic("send", 18)} Открыть @${esc(r.bot)}</a></div>`;
+  const where = { telegram: "в Telegram — бот лаборатории", whatsapp: "в WhatsApp с номера лаборатории", email: "на почту" }[r.channel] || "";
+  return `<div class="note-box ok">Код отправлен ${where}. Действует 10 минут.</div>`;
+}
+const codeField = (id = "lc") => `<label class="field"><span>Код из сообщения</span><input class="input code" id="${id}" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="••••••"></label>`;
 async function renderLogin(mode = "code") {
-  let pub = {};
-  try { pub = await (await fetch("/api/public")).json(); } catch (e) {}
+  try { L.pub = await (await fetch("/api/public")).json(); } catch (e) {}
+  const pub = L.pub;
   document.title = pub.lab || "DenTech";
-  const app = $("#app");
-  app.innerHTML = `<div class="login"><div class="box">
+  $("#app").innerHTML = `<div class="login"><div class="box">
     <div class="logo">${ic("tooth", 34)}</div>
     <h1>${esc(pub.lab || "DenTech")}</h1><p class="sub">Работы, этапы и чат лаборатории с клиниками</p>
-    <div class="card" id="lf"></div>
+    <div class="card" id="lf"></div><div id="lextra"></div>
     <p class="small muted" style="text-align:center;margin-top:16px">${pub.bot ? `Telegram-бот: <a href="https://t.me/${esc(pub.bot)}" target="_blank">@${esc(pub.bot)}</a> — уведомления и вход без пароля` : ""}</p>
   </div></div>`;
   const lf = $("#lf");
-  if (pub.demo && pub.demo.length) {
-    lf.insertAdjacentHTML("afterend", `<div class="card" style="margin-top:12px"><b>Демо-версия</b>
-      <p class="small muted" style="margin:0">Данные вымышленные и сбрасываются каждую ночь. Войдите под любой ролью:</p>
-      ${pub.demo.map((a, i) => `<button class="btn" data-demo="${i}">${esc(a.role)} <span class="muted small">${esc(a.login)} / ${esc(a.password)}</span></button>`).join("")}</div>`);
-    document.querySelectorAll("[data-demo]").forEach((b) => b.onclick = () => act(async () => {
-      const a = pub.demo[+b.dataset.demo];
-      const r = await api("/api/login", { body: { login: a.login, password: a.password } }); setToken(r.token); boot();
-    }));
-  }
-  const seg = `<div class="seg" style="align-self:center"><button class="${mode === "code" ? "on" : ""}" onclick="renderLogin('code')">По телефону</button>
-    <button class="${mode === "pw" ? "on" : ""}" onclick="renderLogin('pw')">Логин и пароль</button></div>`;
+  const tabs = `<div class="seg" style="align-self:center"><button class="${mode === "code" ? "on" : ""}" onclick="renderLogin('code')">По коду</button>
+    <button class="${mode === "pw" ? "on" : ""}" onclick="renderLogin('pw')">С паролем</button>
+    ${pub.registration ? `<button class="${mode === "reg" ? "on" : ""}" onclick="renderLogin('reg')">Регистрация</button>` : ""}</div>`;
+  const cField = `<label class="field"><span>${contactHint()}</span><input class="input" id="l1" inputmode="${pub.email ? "email" : "tel"}" autocomplete="username" placeholder="${contactPh()}" value="${esc(L.contact)}"></label>`;
   if (mode === "pw") {
-    lf.innerHTML = seg + `<label class="field"><span>Логин или телефон</span><input class="input" id="l1" autocomplete="username"></label>
-      <label class="field"><span>Пароль</span><input class="input" id="l2" type="password" autocomplete="current-password"></label>
-      <button class="btn primary lg" id="lb">Войти</button>`;
-    const go = () => act(async () => { const r = await api("/api/login", { body: { login: $("#l1").value, password: $("#l2").value } }); setToken(r.token); boot(); });
+    lf.innerHTML = tabs + cField.replace(contactHint(), contactHint() + " или логин") + `<label class="field"><span>Пароль</span><input class="input" id="l2" type="password" autocomplete="current-password"></label>
+      <button class="btn primary lg" id="lb">Войти</button><button class="btn ghost" onclick="L.contact=$('#l1').value;renderLogin('forgot')">Забыли пароль?</button>`;
+    const go = () => act(async () => { L.contact = $("#l1").value; const r = await api("/api/login", { body: { login: $("#l1").value, password: $("#l2").value } }); setToken(r.token); boot(); });
     $("#lb").onclick = go; $("#l2").onkeydown = (e) => e.key === "Enter" && go();
+  } else if (mode === "forgot") {
+    lf.innerHTML = `<b>Восстановление пароля</b><p class="small muted" style="margin:0">Пришлём код на ваш номер или почту, затем задайте новый пароль.</p>${cField}
+      <div id="fw" class="hidden">${codeField("fc")}<label class="field"><span>Новый пароль (от 8 символов)</span><input class="input" id="fp" type="password" autocomplete="new-password"></label></div>
+      <div id="fnote"></div><button class="btn primary lg" id="fb">Получить код</button><button class="btn ghost" onclick="renderLogin('pw')">Назад</button>`;
+    let sent = false;
+    $("#fb").onclick = () => act(async () => {
+      if (!sent) {
+        L.contact = $("#l1").value; const r = await api("/api/password/forgot", { body: { contact: L.contact } });
+        sent = true; $("#fw").classList.remove("hidden"); $("#fnote").innerHTML = codeSentNote(r); $("#fb").textContent = "Сохранить и войти"; $("#fc").focus();
+      } else {
+        const r = await api("/api/password/reset", { body: { contact: L.contact, code: $("#fc").value, password: $("#fp").value } });
+        if (r.token) { setToken(r.token); boot(); } else { lf.innerHTML = `<div class="empty"><b>Пароль изменён</b>Доступ откроется, когда лаборатория подтвердит заявку.</div><button class="btn" onclick="renderLogin('pw')">Ко входу</button>`; }
+      }
+    });
   } else if (mode === "reg") {
-    lf.innerHTML = `<b>Заявка врача на доступ</b><p class="small muted" style="margin:0">Лаборатория подтвердит заявку, и вы сможете входить по коду.</p>
-      <label class="field"><span>Фамилия и имя</span><input class="input" id="r1"></label>
-      <label class="field"><span>Телефон</span><input class="input" id="r2" type="tel" placeholder="+996 ..."></label>
-      <label class="field"><span>Клиника</span><input class="input" id="r3"></label>
-      <button class="btn primary lg" id="rb">Отправить заявку</button><button class="btn ghost" onclick="renderLogin()">Назад</button>`;
-    $("#rb").onclick = () => act(async () => { await api("/api/register", { body: { name: $("#r1").value, phone: $("#r2").value, clinic: $("#r3").value } });
-      lf.innerHTML = `<div class="empty"><b>Заявка отправлена</b>Когда лаборатория подтвердит доступ, войдите по номеру телефона.</div><button class="btn" onclick="renderLogin()">Ко входу</button>`; });
+    const who = L.who || "staff";
+    lf.innerHTML = tabs + `<div class="seg" style="align-self:stretch;display:flex"><button style="flex:1" class="${who === "staff" ? "on" : ""}" onclick="L.who='staff';renderLogin('reg')">Сотрудник лаборатории</button>
+      <button style="flex:1" class="${who === "doctor" ? "on" : ""}" onclick="L.who='doctor';renderLogin('reg')">Врач клиники</button></div>
+      <div id="rw"><label class="field"><span>Фамилия и имя</span><input class="input" id="r1" autocomplete="name"></label>
+      ${who === "doctor" ? `<label class="field"><span>Клиника</span><input class="input" id="r3" placeholder="Название клиники"></label>` : `<label class="field"><span>Должность (необязательно)</span><input class="input" id="r4" placeholder="Техник-керамист, администратор…"></label>`}
+      ${cField}<label class="field"><span>Придумайте пароль (от 8 символов)</span><input class="input" id="r5" type="password" autocomplete="new-password"></label></div>
+      <div id="rcw" class="hidden">${codeField("rc")}</div><div id="rnote"></div>
+      <button class="btn primary lg" id="rb">Получить код</button>
+      <p class="tiny muted" style="margin:0;text-align:center">После подтверждения кода заявка уйдёт владельцу лаборатории — он откроет доступ.</p>`;
+    let sent = false;
+    $("#rb").onclick = () => act(async () => {
+      if (!sent) {
+        L.contact = $("#l1").value;
+        const r = await api("/api/signup", { body: { kind: who, name: $("#r1").value, clinic: $("#r3")?.value || "", position: $("#r4")?.value || "", contact: L.contact, password: $("#r5").value } });
+        L.sid = r.sid; sent = true; $("#rw").classList.add("hidden"); $("#rcw").classList.remove("hidden"); $("#rnote").innerHTML = codeSentNote(r); $("#rb").textContent = "Подтвердить"; $("#rc").focus();
+      } else {
+        await api("/api/signup/verify", { body: { sid: L.sid, code: $("#rc").value } });
+        lf.innerHTML = `<div class="empty"><b>Заявка отправлена ✓</b>Номер подтверждён. Как только владелец лаборатории откроет доступ, придёт уведомление — войдите с паролем или по коду.</div><button class="btn" onclick="renderLogin('pw')">Ко входу</button>`;
+      }
+    });
   } else {
-    lf.innerHTML = seg + `<label class="field"><span>Номер телефона</span><input class="input" id="p1" type="tel" inputmode="tel" placeholder="+996 555 123 456" autocomplete="tel"></label>
-      <div id="p2w" class="hidden"><label class="field"><span id="p2l">Код</span><input class="input code" id="p2" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></label></div>
-      <button class="btn primary lg" id="pb">Получить код</button>
-      ${pub.registration ? `<button class="btn ghost" onclick="renderLogin('reg')">Я врач, у меня нет доступа</button>` : ""}`;
+    lf.innerHTML = tabs + cField + `<div id="p2w" class="hidden">${codeField("p2")}</div><div id="pnote"></div>
+      <button class="btn primary lg" id="pb">Получить код</button>`;
     let sent = false;
     const go = () => act(async () => {
       if (!sent) {
-        const r = await api("/api/login/code", { body: { phone: $("#p1").value } });
-        sent = true; $("#p2w").classList.remove("hidden"); $("#p2l").textContent = r.channel === "whatsapp" ? "Код из WhatsApp" : "Код из Telegram";
+        L.contact = $("#l1").value; const r = await api("/api/login/code", { body: { contact: L.contact } });
+        sent = true; $("#p2w").classList.remove("hidden"); $("#pnote").innerHTML = codeSentNote(r) + `<button class="btn ghost sm" style="margin-top:6px" onclick="renderLogin('code')">Другой номер / отправить снова</button>`;
         $("#pb").textContent = "Войти"; $("#p2").focus();
       } else {
-        const r = await api("/api/login/verify", { body: { phone: $("#p1").value, code: $("#p2").value } }); setToken(r.token); boot();
+        const r = await api("/api/login/verify", { body: { contact: L.contact, code: $("#p2").value } }); setToken(r.token); boot();
       }
     });
-    $("#pb").onclick = go; $("#p1").onkeydown = $("#p2").onkeydown = (e) => e.key === "Enter" && go();
+    $("#pb").onclick = go; $("#l1").onkeydown = $("#p2").onkeydown = (e) => e.key === "Enter" && go();
     $("#p2").oninput = (e) => e.target.value.length === 6 && go();
+  }
+  if (pub.demo && pub.demo.length && mode !== "forgot") {
+    $("#lextra").innerHTML = `<div class="card" style="margin-top:12px"><b>Демо-версия</b>
+      <p class="small muted" style="margin:0">Данные вымышленные. Войдите под любой ролью:</p>
+      ${pub.demo.map((a, i) => `<button class="btn" data-demo="${i}">${esc(a.role)} <span class="muted small">${esc(a.login)} / ${esc(a.password)}</span></button>`).join("")}</div>`;
+    $$("[data-demo]").forEach((b) => b.onclick = () => act(async () => {
+      const a = pub.demo[+b.dataset.demo];
+      const r = await api("/api/login", { body: { login: a.login, password: a.password } }); setToken(r.token); boot();
+    }));
   }
 }
 function renderPaywall() {
@@ -246,6 +283,7 @@ function route() {
   if (S.chat && !(name === "o" && +arg === S.chat.oid)) stopChat();
   $$("[data-nav]").forEach((a) => a.classList.toggle("on", a.dataset.nav === name || (name === "o" && a.dataset.nav === "orders")));
   $$("[data-tab]").forEach((a) => a.classList.toggle("on", a.dataset.tab === name || (name === "o" && a.dataset.tab === "orders")));
+  closeSheet();
   const page = $("#page"); page.innerHTML = '<div class="spin"></div>';
   window.scrollTo(0, 0);
   const views = { home: vHome, orders: vOrders, o: vOrder, new: vNew, edit: vNew, clinics: vClinics, money: vMoney, catalog: vCatalog,
@@ -387,7 +425,7 @@ async function vOrder(id) {
   const tabs = `<div class="seg mtabs"><button class="on" data-t="info">Работа</button><button data-t="chat">Чат</button><button data-t="files">Файлы ${o.files.length || ""}</button></div>`;
   $("#page").innerHTML = `${tabs}<div class="odetail"><div>
       <section data-pane="info" class="on"><div id="headBox">${headHtml(o)}</div>
-        <div class="sec">Этапы и примерки ${isLab() ? `<button class="btn sm" onclick="addFitting()">${ic("plus", 16)} Ещё примерка</button>` : ""}</div><div class="card" id="stagesBox">${stagesHtml(o)}</div>
+        <div class="sec">Этапы и примерки ${isLab() ? `<button class="btn sm" onclick="addFitting()">${ic("plus", 16)} Этап / примерка</button>` : ""}</div><div class="card" id="stagesBox">${stagesHtml(o)}</div>
         <div id="infoBox">${infoHtml(o)}</div></section>
       <section data-pane="files"><div class="sec">Файлы <span class="muted" style="text-transform:none">сканы STL, фото, КЛКТ, PDF</span></div><div class="card"><div id="filesBox">${filesHtml(o)}</div>
         <div class="drop-zone" id="dz" style="margin-top:10px" onclick="$('#fpick').click()">Перетащите файлы сюда или нажмите, чтобы выбрать (до 100 МБ)</div></div></section>
@@ -407,7 +445,7 @@ async function vOrder(id) {
 }
 function headHtml(o) {
   const parts = Object.entries(o.parts || {}).filter(([, v]) => (v.clinic || 0) + (v.lab || 0) > 0);
-  const pname = Object.fromEntries(S.ref.parts);
+  const pname = S.ref.parts_all || Object.fromEntries(S.ref.parts);
   const statusBtns = isLab() ? `<select class="input" style="width:auto" onchange="setStatus(this.value)">${Object.entries(S.ref.statuses).map(([k, v]) => `<option value="${k}" ${k === o.status ? "selected" : ""}>${v}</option>`).join("")}</select>` :
     (o.status === "new" ? `<button class="btn sm danger" onclick="setStatus('cancelled')">Отменить наряд</button>` : "");
   const teethMap = {};
@@ -425,7 +463,7 @@ function headHtml(o) {
 }
 function infoHtml(o) {
   const parts = Object.entries(o.parts || {}).filter(([, v]) => (v.clinic || 0) + (v.lab || 0) > 0);
-  const pname = Object.fromEntries(S.ref.parts);
+  const pname = S.ref.parts_all || Object.fromEntries(S.ref.parts);
   const teethMap = {};
   o.items.forEach((it, i) => (it.teeth || "").split(/\s+/).filter(Boolean).forEach((t) => (teethMap[t] = { name: it.name, c: COLORS[i % COLORS.length] })));
   return `
@@ -440,10 +478,48 @@ function infoHtml(o) {
   ${S.ref.ai ? `<div class="sec">ИИ</div><div class="card"><button class="btn sm" id="sumBtn" onclick="aiSummary()">${ic("ai", 16)} Сводка по работе</button><div id="sumBox" class="small" style="white-space:pre-wrap;margin-top:8px"></div></div>` : ""}
   ${isMgr() && S.me.role === "owner" ? `<p style="margin-top:20px"><button class="btn sm danger" onclick="delOrder()">Удалить наряд</button></p>` : ""}`;
 }
+/* Зубная формула (FDI) — две дуги: верхняя и нижняя челюсть, слева на экране — правая сторона пациента.
+   Форма зуба по типу: резцы, клыки, премоляры, моляры. */
+const TOOTH_W = { 1: 0.92, 2: 0.78, 3: 0.86, 4: 0.82, 5: 0.82, 6: 1.18, 7: 1.08, 8: 0.98 };
+const TOOTH_KIND = (n) => [, "резец", "резец", "клык", "премоляр", "премоляр", "моляр", "моляр", "моляр (зуб мудрости)"][n % 10];
+function toothShape(k, w) {
+  const h = w * ({ 1: 0.72, 2: 0.74, 3: 0.95, 4: 1.0, 5: 1.0, 6: 1.0, 7: 0.98, 8: 0.94 }[k]);
+  const x = -w / 2, y = -h / 2;
+  if (k <= 2) return [`<rect class="body" x="${x}" y="${y}" width="${w}" height="${h}" rx="${h * 0.48}"/>`, `<path class="ln" d="M${x + w * 0.2} ${y + h * 0.36}Q0 ${y + h * 0.2} ${-x - w * 0.2} ${y + h * 0.36}"/>`, h];
+  if (k === 3) return [`<path class="body" d="M0 ${y}C${w * 0.42} ${y + h * 0.18} ${w / 2} ${h * 0.2} ${w * 0.3} ${h * 0.42}Q0 ${h * 0.56} ${-w * 0.3} ${h * 0.42}C${-w / 2} ${h * 0.2} ${-w * 0.42} ${y + h * 0.18} 0 ${y}Z"/>`, `<path class="ln" d="M0 ${y + h * 0.22}L0 ${h * 0.16}"/>`, h];
+  if (k <= 5) return [`<ellipse class="body" cx="0" cy="0" rx="${w / 2}" ry="${h / 2}"/>`, `<path class="ln" d="M${-w * 0.26} 0Q0 ${h * 0.08} ${w * 0.26} 0"/>`, h];
+  return [`<rect class="body" x="${x}" y="${y}" width="${w}" height="${h}" rx="${w * 0.3}"/>`, `<path class="ln" d="M${x + w * 0.2} ${-h * 0.04}Q0 ${h * 0.1} ${-x - w * 0.2} ${-h * 0.04}M${-w * 0.1} ${y + h * 0.18}L${-w * 0.04} ${h * 0.02}L${-w * 0.12} ${-y - h * 0.2}M${w * 0.14} ${y + h * 0.2}L${w * 0.06} ${h * 0.04}"/>`, h];
+}
 function teethHtml(map, ro, sel) {
   const up = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28], lo = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
-  const b = (n) => { const m = map[n]; return `<button type="button" class="tooth ${sel && sel.has(String(n)) ? "sel" : ""} ${m ? "has" : ""}" style="${m ? "--c:" + m.c : ""}" data-t="${n}" ${ro ? "tabindex=-1" : ""}>${n}${m ? `<small>${esc(m.code || m.name.slice(0, 4))}</small>` : ""}</button>`; };
-  return `<div class="teeth ${ro ? "ro" : ""}">${up.map(b).join("")}<div class="mid"></div>${lo.map(b).join("")}</div>`;
+  const RX = 172, RY = 132, A0 = 188 * Math.PI / 180, A1 = -8 * Math.PI / 180, CX = 200;
+  // равномерно по длине дуги эллипса: таблица t → накопленная длина
+  const N = 360, tab = [[A0, 0]];
+  for (let i = 1; i <= N; i++) { const t0 = A0 + (A1 - A0) * (i - 1) / N, t1 = A0 + (A1 - A0) * i / N;
+    tab.push([t1, tab[i - 1][1] + Math.hypot(RX * (Math.cos(t1) - Math.cos(t0)), RY * (Math.sin(t1) - Math.sin(t0)))]); }
+  const L = tab[N][1], tAt = (len) => { let i = 1; while (i < N && tab[i][1] < len) i++; const [ta, la] = tab[i - 1], [tb, lb] = tab[i]; return ta + (tb - ta) * ((len - la) / ((lb - la) || 1)); };
+  const arch = (list, cy, dir) => {
+    const tot = list.reduce((a, n) => a + TOOTH_W[n % 10], 0), k = L / tot;
+    let acc = 0;
+    return list.map((n) => {
+      const ww = TOOTH_W[n % 10], t = tAt((acc + ww / 2) * k); acc += ww;
+      const cx = CX + RX * Math.cos(t), cy0 = cy - dir * RY * Math.sin(t);
+      const rot = Math.atan2(Math.cos(t) / RX, dir * Math.sin(t) / RY) * 180 / Math.PI;
+      const [body, ln, h] = toothShape(n % 10, ww * k * 0.9);
+      const m = map[n], on = sel && sel.has(String(n));
+      const off = h / 2 + 12, lx = CX + (RX - off) * Math.cos(t), ly = cy - dir * (RY - off) * Math.sin(t);
+      return `<g class="tooth ${on ? "sel" : ""} ${m ? "has" : ""}" data-t="${n}" style="${m ? "--c:" + m.c : ""}" ${ro ? "" : 'tabindex="0" role="button"'} aria-label="Зуб ${n}">
+        <title>${n} — ${TOOTH_KIND(n)}${m ? ": " + esc(m.name) : ""}</title>
+        <g transform="translate(${cx.toFixed(1)} ${cy0.toFixed(1)}) rotate(${rot.toFixed(1)})">${body}${ln}</g>
+        <text class="num" x="${lx.toFixed(1)}" y="${(ly + 4).toFixed(1)}">${n}</text></g>`;
+    }).join("");
+  };
+  const UY = 166, LY = 222;
+  return `<div class="odo ${ro ? "ro" : ""}"><svg viewBox="0 0 400 388" role="group" aria-label="Зубная формула">
+    <line class="midline" x1="200" y1="${UY - 28}" x2="200" y2="${LY + 34}"/>
+    <text class="jaw" x="200" y="${UY - 40}">Верхняя челюсть</text><text class="jaw" x="200" y="${LY + 48}">Нижняя челюсть</text>
+    <text class="sidelbl" x="128" y="${(UY + LY) / 2 + 4}">← правая</text><text class="sidelbl" x="272" y="${(UY + LY) / 2 + 4}">левая →</text>
+    ${arch(up, UY, 1)}${arch(lo, LY, -1)}</svg></div>`;
 }
 function stagesHtml(o) {
   if (!o.stages.length) return '<div class="muted">Этапов нет</div>';
@@ -458,7 +534,7 @@ function stagesHtml(o) {
         a.push(`<button class="btn sm" onclick="stageAct(${s.id},'done')">${last ? "Готово к сдаче" : "Этап завершён"}</button>`);
       }
       if (s.state === "done" && isMgr()) a.push(`<button class="btn sm ghost" onclick="stageAct(${s.id},'reopen')">Вернуть</button>`);
-      if (isMgr() && s.state === "wait" && /^Примерка \d/.test(s.name)) a.push(`<button class="btn sm ghost danger" onclick="delStage(${s.id})">Убрать</button>`);
+      if (isMgr() && s.state === "wait" && i < o.stages.length - 1) a.push(`<button class="btn sm ghost danger" onclick="delStage(${s.id})">Убрать</button>`);
     }
     if (s.state === "clinic" && (isClient() || isMgr())) {
       a.push(`<button class="btn sm primary" onclick="stageAct(${s.id},'ok')">👍 Ок, продолжайте</button>`);
@@ -496,7 +572,14 @@ function stageFix(sid) {
     <p class="small muted">Фото можно прикрепить в чате работы.</p>`, { foot: `<button class="btn" onclick="closeSheet()">Отмена</button><button class="btn primary" onclick="(async()=>{const n=$('#fixn').value;closeSheet();await stageAct(${sid},'fix',n)})()">Отправить</button>` });
   setTimeout(() => $("#fixn").focus(), 50);
 }
-async function addFitting() { await act(() => api(`/api/orders/${S.cur.id}/stages`, { body: {} }), "Добавлена примерка"); await reloadOrder(); pollChat(); }
+function addFitting() {
+  const have = new Set(S.cur.stages.map((x) => x.name));
+  sheet("Добавить этап", `<p class="small muted" style="margin-top:0">Этап встанет перед сдачей. «Примерка» нумеруется сама.</p>
+    <div class="pills"><button type="button" class="pill" data-n="">+ Примерка</button>${(S.ref.stage_lib || []).filter((x) => !have.has(x) && !/сдача/i.test(x)).map((x) => `<button type="button" class="pill" data-n="${esc(x)}">+ ${esc(x)}</button>`).join("")}</div>`);
+  $$(".sheet .pill[data-n]").forEach((p) => p.onclick = async () => {
+    closeSheet(); await act(() => api(`/api/orders/${S.cur.id}/stages`, { body: { name: p.dataset.n } }), "Этап добавлен"); await reloadOrder(); pollChat();
+  });
+}
 async function delStage(sid) { if (!confirm("Убрать этот этап?")) return; await act(() => api(`/api/stages/${sid}`, { method: "DELETE" })); await reloadOrder(); }
 async function setStatus(s) {
   if (s === "cancelled" && !confirm("Отменить наряд?")) return reloadOrder();
@@ -659,7 +742,7 @@ async function vNew(editId) {
   </div><div>
     <div class="sec">Цвет и детали</div><div class="card"><div class="form" style="grid-template-columns:1fr">
       <label class="field"><span>Цвет (шкала Vita)</span><input class="input" id="f_shade" value="${esc(F.shade)}" placeholder="A2, BL3…"></label>
-      <div class="pills" id="shades">${["BL1", "BL2", "BL3", "A1", "A2", "A3", "A3.5", "B1", "B2", "C1", "D2"].map((s) => `<button type="button" class="pill" data-s="${s}">${s}</button>`).join("")}</div>
+      <div class="pills" id="shades">${(S.ref.shades || []).map((s) => `<button type="button" class="pill" data-s="${s}">${s}</button>`).join("")}</div>
       <label class="field" style="flex-direction:row;align-items:center;justify-content:space-between"><span>Нужно фото (цвет/улыбка)</span><span class="switch"><input type="checkbox" id="f_photo" ${F.need_photo ? "checked" : ""}><i></i></span></label>
       <div class="field"><span>Система импланта</span><div class="pills" id="impl">${S.ref.implants.map((s) => `<button type="button" class="pill" data-s="${esc(s)}">${esc(s)}</button>`).join("")}</div></div>
     </div></div>
@@ -696,8 +779,18 @@ function paintTeeth() {
     const c = S.ref.catalog.find((x) => x.id === it.catalog_id); map[t] = { name: it.name, code: c ? c.code : "", c: COLORS[i % COLORS.length] };
   }));
   $("#teethBox").innerHTML = teethHtml(map, false, F.sel);
-  $$("#teethBox .tooth").forEach((b) => b.onclick = () => { const t = b.dataset.t; F.sel.has(t) ? F.sel.delete(t) : F.sel.add(t); haptic(); paintTeeth(); });
-  $("#selHint").innerHTML = F.sel.size ? `Отмечено: <b>${[...F.sel].join(", ")}</b> — выберите вид работы ниже · <a href="javascript:S.form.sel.clear();paintTeeth()">сбросить</a>` : "Нажмите на зубы, чтобы отметить их";
+  $$("#teethBox .tooth").forEach((b) => {
+    const tg = () => { const t = b.dataset.t; F.sel.has(t) ? F.sel.delete(t) : F.sel.add(t); haptic(); paintTeeth(); };
+    b.onclick = tg; b.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); tg(); } };
+  });
+  const jaw = (q) => `<button type="button" class="pill" onclick="selJaw(${q})">${q === 1 ? "Вся верхняя" : "Вся нижняя"}</button>`;
+  $("#selHint").innerHTML = (F.sel.size ? `Отмечено: <b>${sortTeeth([...F.sel])}</b> — выберите вид работы ниже` : "Нажмите на зубы, чтобы отметить их") +
+    `<div class="pills" style="margin-top:8px">${jaw(1)}${jaw(4)}${F.sel.size ? `<button type="button" class="pill" onclick="S.form.sel.clear();paintTeeth()">Сбросить</button>` : ""}</div>`;
+}
+function selJaw(q) {
+  const F = S.form, list = q === 1 ? [11, 12, 13, 14, 15, 16, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28] : [31, 32, 33, 34, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48];
+  const all = list.every((n) => F.sel.has(String(n)));
+  list.forEach((n) => all ? F.sel.delete(String(n)) : F.sel.add(String(n))); haptic(); paintTeeth();
 }
 const sortTeeth = (arr) => arr.map(Number).sort((a, b) => { const q = (n) => [1, 2, 4, 3].indexOf(Math.floor(n / 10)) * 10 + (Math.floor(n / 10) % 2 ? 9 - (n % 10) : n % 10); return q(a) - q(b); }).join(" ");
 function addWork(cid) {
@@ -794,7 +887,7 @@ async function printOrder() {
   try { const q = qrcode(0, "M"); q.addData(location.origin + "/#/o/" + o.id); q.make(); qr = q.createImgTag(3, 0); } catch (e) {}
   const T = new Set(o.items.flatMap((i) => (i.teeth || "").split(/\s+/).filter(Boolean)));
   const row = (a) => a.map((n) => `<td class="${T.has(String(n)) ? "on" : ""}">${n}</td>`).join("");
-  const pname = Object.fromEntries(S.ref.parts);
+  const pname = S.ref.parts_all || Object.fromEntries(S.ref.parts);
   const w = window.open("", "_blank");
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Наряд №${o.number}</title><style>
     body{font:13px/1.35 -apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#111;margin:18px}h1{margin:0;font-size:24px;letter-spacing:.04em}
@@ -810,7 +903,7 @@ async function printOrder() {
     <table class="teeth"><tr>${row([18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28])}</tr><tr>${row([48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38])}</tr></table>
     <table><tr><th>Работа</th><th>Зубы</th><th>Кол-во</th></tr>${o.items.map((i) => `<tr><td>${esc(i.name)}</td><td>${esc(i.teeth || "")}</td><td>${i.qty}</td></tr>`).join("")}</table>
     <table><tr><th>Цвет</th><td>${esc(o.shade || "")}</td><th>Фото</th><td>${o.need_photo ? "да" : ""}</td></tr><tr><th>Система импланта</th><td colspan="3">${esc(o.implant_system || "")}</td></tr></table>
-    <table><tr><th>Компонент</th><th>Клиника, шт</th><th>Лаборатория, шт</th></tr>${S.ref.parts.map(([k, n]) => { const v = (o.parts || {})[k] || {}; return `<tr><td>${esc(n)}</td><td>${v.clinic || ""}</td><td>${v.lab || ""}</td></tr>`; }).join("")}</table>
+    <table><tr><th>Компонент</th><th>Клиника, шт</th><th>Лаборатория, шт</th></tr>${Object.entries({ ...Object.fromEntries(S.ref.parts), ...Object.fromEntries(Object.keys(o.parts || {}).map((k) => [k, pname[k] || k])) }).map(([k, n]) => { const v = (o.parts || {})[k] || {}; return `<tr><td>${esc(n)}</td><td>${v.clinic || ""}</td><td>${v.lab || ""}</td></tr>`; }).join("")}</table>
     <table><tr><th>Этап</th><th>Дата получения</th><th>Дата отправки</th><th>Техник</th></tr>${o.stages.map((s) => `<tr><td>${esc(s.name)}</td><td>${s.received_at ? fdate(s.received_at) : ""}</td><td>${s.sent_at ? fdate(s.sent_at) : ""}</td><td>${esc(s.tech_name || "")}</td></tr>`).join("")}</table>
     <table><tr><th>Примечание</th><td style="height:50px;white-space:pre-wrap">${esc(o.note || "")}</td></tr></table>
     <button onclick="print()">Печать</button><script>setTimeout(()=>print(),400)<\/script></body></html>`);
@@ -948,23 +1041,43 @@ async function loadSalary() {
 /* ---------- прайс ---------- */
 async function vCatalog() {
   setTop("Прайс и этапы", { actions: `<button class="btn primary" onclick="addCat()">${ic("plus", 18)} Работа</button>` });
-  const cat = await api("/api/catalog");
+  const cat = await api("/api/catalog"); S.cat = cat;
   $("#page").innerHTML = `<p class="small muted" style="margin-top:0">Цена — для клиники. Ставка техника — сдельная оплата за единицу. Этапы создаются в каждом новом наряде с этой работой.</p>
-  <div class="tablewrap"><table class="t"><tr><th>Работа</th><th>Группа</th><th>Единица</th><th class="r">Цена</th><th class="r">Ставка техника</th><th class="r">Дней</th><th>Этапы (через запятую)</th><th>Вкл.</th></tr>
+  <div class="tablewrap"><table class="t"><tr><th>Работа</th><th>Группа</th><th>Единица</th><th class="r">Цена</th><th class="r">Ставка техника</th><th class="r">Дней</th><th>Этапы</th><th>Вкл.</th></tr>
   ${cat.map((c) => `<tr data-id="${c.id}"><td><input class="input" data-k="name" value="${esc(c.name)}" style="min-width:150px"></td>
     <td><select class="input" data-k="category">${Object.entries(S.ref.categories).map(([k, v]) => `<option value="${k}" ${k === c.category ? "selected" : ""}>${v}</option>`).join("")}</select></td>
     <td><select class="input" data-k="unit">${Object.entries(S.ref.units).map(([k, v]) => `<option value="${k}" ${k === c.unit ? "selected" : ""}>${v}</option>`).join("")}</select></td>
     <td><input class="input num" data-k="price" type="number" value="${c.price}" style="width:100px;text-align:right"></td>
     <td><input class="input num" data-k="tech_pay" type="number" value="${c.tech_pay}" style="width:100px;text-align:right"></td>
     <td><input class="input num" data-k="days" type="number" value="${c.days}" style="width:64px;text-align:right"></td>
-    <td><input class="input" data-k="stages" value="${esc(c.stages.join(", "))}" style="min-width:260px"></td>
+    <td><button class="stchips" type="button" onclick="editStages(${c.id})">${c.stages.map((x) => `<span>${esc(x)}</span>`).join('<i>→</i>') || '<span class="muted">не заданы</span>'}</button></td>
     <td><span class="switch"><input type="checkbox" data-k="active" ${c.active ? "checked" : ""}><i></i></span></td></tr>`).join("")}</table></div>`;
   $$("table.t [data-k]").forEach((el) => el.onchange = () => {
     const id = el.closest("tr").dataset.id, k = el.dataset.k;
     let v = el.type === "checkbox" ? (el.checked ? 1 : 0) : el.type === "number" ? +el.value : el.value;
-    if (k === "stages") v = el.value.split(",").map((s) => s.trim()).filter(Boolean);
     act(async () => { await api("/api/catalog/" + id, { method: "PATCH", body: { [k]: v } }); const r = await api("/api/me"); S.ref = r.ref; }, "Сохранено");
   });
+}
+/* Этапы работы — выбираются из справочника этапов (Настройки → Справочники), порядок меняется стрелками */
+function editStages(cid) {
+  const c = S.cat.find((x) => x.id === cid), list = [...c.stages];
+  const paint = () => {
+    $("#stl").innerHTML = list.map((x, i) => `<div class="row"><span class="mk-n">${i + 1}</span><div class="grow t">${esc(x)}</div>
+      <button class="icon-btn" type="button" ${i ? "" : "disabled"} onclick="S._st(${i},-1)">↑</button><button class="icon-btn" type="button" ${i < list.length - 1 ? "" : "disabled"} onclick="S._st(${i},1)">↓</button>
+      <button class="icon-btn" type="button" onclick="S._st(${i},0)">${ic("x", 14)}</button></div>`).join("") || '<div class="row muted">Этапов нет — добавьте из справочника</div>';
+    $("#stadd").innerHTML = (S.ref.stage_lib || []).filter((x) => !list.includes(x)).map((x) => `<button type="button" class="pill" data-a="${esc(x)}">+ ${esc(x)}</button>`).join("");
+    $$("#stadd .pill").forEach((p) => p.onclick = () => { list.push(p.dataset.a); paint(); });
+  };
+  S._st = (i, d) => { if (!d) list.splice(i, 1); else { const j = i + d; [list[i], list[j]] = [list[j], list[i]]; } paint(); };
+  sheet(`Этапы: ${c.name}`, `<p class="small muted" style="margin-top:0">Эти этапы создаются в каждом новом наряде с этой работой. Последний этап — сдача.</p>
+    <div class="group" id="stl"></div><div class="sec">Добавить из справочника</div><div class="pills" id="stadd"></div>
+    <div class="toolbar" style="margin-top:12px"><input class="input" id="stnew" placeholder="Новый этап (попадёт в справочник)"><button class="btn sm" type="button" onclick="(()=>{const v=$('#stnew').value.trim();if(v){S._stl.push(v);$('#stnew').value='';S._stp()}})()">Добавить</button></div>`,
+  { foot: `<button class="btn primary" id="stsave">Сохранить</button>` });
+  S._stl = list; S._stp = paint; paint();
+  $("#stsave").onclick = () => act(async () => {
+    await api("/api/catalog/" + cid, { method: "PATCH", body: { stages: list } });
+    const r = await api("/api/me"); S.ref = r.ref; closeSheet(); vCatalog();
+  }, "Сохранено");
 }
 async function addCat() {
   const n = prompt("Название работы"); if (!n) return;
@@ -977,15 +1090,15 @@ async function vPeople() {
   const us = await api("/api/users"); S.users = us;
   const pend = us.filter((u) => !u.approved && u.active);
   const grp = (title, list) => list.length ? `<div class="sec">${title}</div><div class="group">${list.map(urow).join("")}</div>` : "";
-  $("#page").innerHTML = (pend.length ? `<div class="sec" style="color:var(--warn)">Заявки на доступ</div><div class="group">${pend.map((u) => `<div class="row">${av(u.id, u.name)}<div class="grow"><div class="t">${esc(u.name)}</div><div class="s">${esc(u.phone)} · ${esc(u.note || "")}</div></div>
-      <button class="btn sm" onclick="editUser(${u.id})">Клиника…</button><button class="btn sm primary" onclick="approve(${u.id})">Подтвердить</button><button class="btn sm danger" onclick="reject(${u.id})">✕</button></div>`).join("")}</div>` : "")
+  $("#page").innerHTML = (pend.length ? `<div class="sec" style="color:var(--warn)">Заявки на доступ</div><div class="group">${pend.map((u) => `<div class="row">${av(u.id, u.name)}<div class="grow"><div class="t">${esc(u.name)}</div><div class="s">${esc(S.ref.roles[u.role])} · ${esc(u.phone || u.email || "")} · ${esc(u.note || "")}</div></div>
+      <button class="btn sm" onclick="editUser(${u.id})">${["doctor", "clinic"].includes(u.role) ? "Клиника…" : "Роль…"}</button><button class="btn sm primary" onclick="approve(${u.id})">Подтвердить</button><button class="btn sm danger" onclick="reject(${u.id})">✕</button></div>`).join("")}</div>` : "")
     + grp("Лаборатория", us.filter((u) => ["owner", "admin", "tech"].includes(u.role) && u.active))
     + grp("Врачи и клиники", us.filter((u) => ["doctor", "clinic"].includes(u.role) && u.active && u.approved))
     + grp("Отключены", us.filter((u) => !u.active));
 }
 function urow(u) {
   return `<div class="row link" onclick="editUser(${u.id})" style="${u.active ? "" : "opacity:.5"}">${av(u.id, u.name)}<div class="grow"><div class="t">${esc(u.name)}</div>
-    <div class="s">${esc(S.ref.roles[u.role])}${u.clinic_name ? " · " + esc(u.clinic_name) : ""} · ${esc(u.phone || "без телефона")}</div></div>
+    <div class="s">${esc(S.ref.roles[u.role])}${u.clinic_name ? " · " + esc(u.clinic_name) : ""} · ${esc(u.phone || u.email || "без телефона")}</div></div>
     <div class="r small">${u.tg_id ? '<span class="chip st-ready">Telegram</span>' : '<span class="chip plain">нет Telegram</span>'}${u.last_seen ? `<div class="tiny muted" style="margin-top:3px">был(а) ${fdate(u.last_seen)}</div>` : ""}</div></div>`;
 }
 async function approve(id) { await act(() => api("/api/users/" + id, { method: "PATCH", body: { approved: 1 } }), "Доступ открыт"); vPeople(); }
@@ -999,6 +1112,7 @@ async function editUser(id, preset = {}) {
     <label class="field"><span>Роль</span><select class="input" id="u_role">${roles.map(([k, v]) => `<option value="${k}" ${k === u.role ? "selected" : ""}>${v}</option>`).join("")}</select></label>
     <label class="field" id="u_clw"><span>Клиника</span><select class="input" id="u_clinic"><option value="">—</option>${S.ref.clinics.map((c) => `<option value="${c.id}" ${c.id === u.clinic_id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label>
     <label class="field"><span>Телефон (для входа по коду и WhatsApp)</span><input class="input" id="u_phone" type="tel" value="${esc(u.phone || "")}"></label>
+    <label class="field"><span>E-mail (для входа по коду и восстановления пароля)</span><input class="input" id="u_email" type="email" value="${esc(u.email || "")}"></label>
     <label class="field"><span>Логин (необязательно)</span><input class="input" id="u_login" value="${esc(u.login || "")}"></label>
     <label class="field"><span>${id ? "Новый пароль" : "Пароль"} (необязательно, от 8 символов)</span><input class="input" id="u_pw" type="password" autocomplete="new-password"></label>
     ${id ? `<label class="field" style="flex-direction:row;align-items:center;justify-content:space-between"><span>Активен</span><span class="switch"><input type="checkbox" id="u_active" ${u.active ? "checked" : ""}><i></i></span></label>` : ""}
@@ -1007,7 +1121,7 @@ async function editUser(id, preset = {}) {
   { foot: `<button class="btn primary" id="u_save">Сохранить</button>` });
   const sync = () => $("#u_clw").classList.toggle("hidden", !["doctor", "clinic"].includes($("#u_role").value)); sync(); $("#u_role").onchange = sync;
   $("#u_save").onclick = () => act(async () => {
-    const b = { name: $("#u_name").value, role: $("#u_role").value, clinic_id: +$("#u_clinic").value || null, phone: $("#u_phone").value, login: $("#u_login").value };
+    const b = { name: $("#u_name").value, role: $("#u_role").value, clinic_id: +$("#u_clinic").value || null, phone: $("#u_phone").value, email: $("#u_email").value, login: $("#u_login").value };
     if ($("#u_pw").value) b.password = $("#u_pw").value;
     if (id) b.active = $("#u_active").checked ? 1 : 0;
     const x = await api("/api/users" + (id ? "/" + id : ""), { method: id ? "PATCH" : "POST", body: b });
@@ -1043,10 +1157,36 @@ async function vSettings() {
   <div class="sec">Наряды</div><div class="group">
     <div class="row"><div class="grow">Следующий номер наряда (если продолжаете бумажную нумерацию)</div><input class="input num" style="width:110px" type="number" data-s="next_number" value="${esc(st.next_number)}"></div>
     <div class="row"><div class="grow">Техники видят цены</div><span class="switch"><input type="checkbox" data-s="tech_sees_prices" ${st.tech_sees_prices === "1" ? "checked" : ""}><i></i></span></div></div>
+  <div class="sec">Справочники</div><div class="group">${Object.entries(S.ref.ref_kinds || {}).map(([k, l]) => {
+      const items = k === "parts" ? S.ref.parts.map(([, n]) => n) : k === "stages" ? S.ref.stage_lib : S.ref[k] || [];
+      return `<div class="row link" onclick="editRef('${k}')"><div class="grow"><div class="t">${esc(l)}</div><div class="s">${esc(items.slice(0, 6).join(", "))}${items.length > 6 ? " и ещё " + (items.length - 6) : ""}</div></div><span class="chip plain">${items.length}</span></div>`; }).join("")}</div>
   <div class="sec">Журнал действий</div><div class="group"><div class="row link" onclick="auditLog()">${ic("list")}<div class="grow">Кто что менял</div></div></div>`;
   $("#page").innerHTML = html;
   $$("[data-s]").forEach((el) => el.onchange = () => act(() => api("/api/settings", { method: "PATCH", body: { [el.dataset.s]: el.type === "checkbox" ? (el.checked ? "1" : "0") : el.value } }), "Сохранено"));
   waPanel();
+}
+/* Справочник: список строк — переименовать, переставить, удалить, добавить */
+async function editRef(kind) {
+  const all = await api("/api/refs");
+  const list = kind === "parts" ? all.parts.filter((p) => !p.off).map((p) => ({ k: p.k, n: p.n })) : all[kind].map((n) => ({ n }));
+  const hint = { implants: "Появляются кнопками в наряде («Система импланта»).", parts: "Компоненты в наряде: сколько штук от клиники и от лаборатории. Удалённые остаются в старых нарядах.",
+    stages: "Из этого списка собираются этапы работ в «Прайсе». Уже созданные наряды не меняются.", shades: "Быстрые кнопки цвета в наряде; вписать любой цвет вручную можно всегда." }[kind];
+  const paint = () => {
+    $("#rfl").innerHTML = list.map((x, i) => `<div class="row"><input class="input" style="height:36px" value="${esc(x.n)}" oninput="S._rf[${i}].n=this.value">
+      <button class="icon-btn" type="button" ${i ? "" : "disabled"} onclick="S._rm(${i},-1)">↑</button><button class="icon-btn" type="button" ${i < list.length - 1 ? "" : "disabled"} onclick="S._rm(${i},1)">↓</button>
+      <button class="icon-btn" type="button" onclick="S._rm(${i},0)">${ic("x", 14)}</button></div>`).join("") || '<div class="row muted">Пусто</div>';
+  };
+  S._rf = list; S._rm = (i, d) => { if (!d) list.splice(i, 1); else { const j = i + d; [list[i], list[j]] = [list[j], list[i]]; } paint(); };
+  sheet(S.ref.ref_kinds[kind], `<p class="small muted" style="margin-top:0">${hint}</p><div class="group" id="rfl"></div>
+    <div class="toolbar" style="margin-top:12px"><input class="input" id="rfnew" placeholder="Добавить…"><button class="btn sm" type="button" id="rfadd">Добавить</button></div>`,
+  { foot: `<button class="btn primary" id="rfsave">Сохранить</button>` });
+  paint();
+  const add = () => { const v = $("#rfnew").value.trim(); if (!v) return; list.push({ n: v }); $("#rfnew").value = ""; paint(); $("#rfnew").focus(); };
+  $("#rfadd").onclick = add; $("#rfnew").onkeydown = (e) => e.key === "Enter" && add();
+  $("#rfsave").onclick = () => act(async () => {
+    await api("/api/refs/" + kind, { method: "PUT", body: { items: kind === "parts" ? list : list.map((x) => x.n) } });
+    const r = await api("/api/me"); S.ref = r.ref; closeSheet(); vSettings();
+  }, "Справочник сохранён");
 }
 function setTheme(t) { try { localStorage.setItem("dt_theme", t); } catch (e) {} applyTheme(); vSettings(); }
 function applyTheme() { const t = (() => { try { return localStorage.getItem("dt_theme"); } catch (e) { return null; } })(); if (!TG) { if (t && t !== "auto") document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; } }

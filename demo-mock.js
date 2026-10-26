@@ -176,7 +176,8 @@
       delete ST[a.login];
       return ok({ token: "demo:" + a.login, user: DATA.roles[a.login].me.user });
     }
-    if (path.startsWith("/api/login") || path === "/api/register") return err(400, "В демо вход по кнопкам ролей ниже");
+    if (path.startsWith("/api/login") || path === "/api/register" || path.startsWith("/api/signup") || path.startsWith("/api/password"))
+      return err(400, "Это демо: регистрация и вход по коду работают в рабочей системе. Здесь войдите кнопкой роли ниже.");
     if (path === "/api/logout") return ok({ ok: true });
     const r = R();
     if (!r) return err(401, "Войдите заново");
@@ -187,6 +188,8 @@
       if (path === "/api/orders") return ok(listOrders(r, q));
       if ((m = path.match(/^\/api\/orders\/(\d+)$/))) { const o = order(r, m[1]); if (!o) return err(404, "Наряд не найден"); const li = r.orders.find((x) => x.id === +m[1]); if (li) li.unread = 0; return ok(o); }
       if ((m = path.match(/^\/api\/orders\/(\d+)\/messages$/))) { const a = +(q.get("after") || 0); return ok((r.messages[m[1]] || []).filter((x) => x.id > a)); }
+      if (path === "/api/refs") { const f = r.me.ref; return ok({ implants: f.implants, shades: f.shades, stages: f.stage_lib,
+        parts: Object.entries(f.parts_all || {}).map(([k, n]) => ({ k, n, ...(f.parts.some(([pk]) => pk === k) ? {} : { off: 1 }) })) }); }
       if (path === "/api/clinics") return fx(r.clinics);
       if ((m = path.match(/^\/api\/clinics\/(\d+)$/))) return fx(r.clinic[m[1]] || { __error: 404, detail: "Клиника не найдена" });
       if (path === "/api/statement") return fx(r.statement[q.get("clinic_id") || "_"] || r.statement._);
@@ -216,7 +219,8 @@
     if ((m = path.match(/^\/api\/orders\/(\d+)\/stages$/))) {
       const o = order(r, m[1]); if (!o) return err(404, "Наряд не найден");
       const lastS = o.stages[o.stages.length - 1], seq = lastS ? lastS.seq - 1 : 10;
-      const s = { id: ++nextId, order_id: o.id, seq, name: (body.name || "Примерка").trim(), tech_id: o.tech_id, plan_at: null, received_at: null, sent_at: null,
+      const nf = o.stages.filter((x) => /^примерка/i.test(x.name)).length + 1;
+      const s = { id: ++nextId, order_id: o.id, seq, name: (body.name || "").trim() || (nf > 1 ? "Примерка " + nf : "Примерка"), tech_id: o.tech_id, plan_at: null, received_at: null, sent_at: null,
         done_at: null, state: "wait", result: "", note: "", tech_name: o.tech_name };
       o.stages.push(s); o.stages.sort((a, b) => a.seq - b.seq); syncList(r, o); return ok(o);
     }
@@ -240,6 +244,21 @@
       for (const k of ["urgent", "need_photo"]) if (k in body) o[k] = body[k] ? 1 : 0;
       if ("tech_id" in body) { o.tech_id = body.tech_id || null; o.tech_name = ((r.me.ref.techs || []).find((x) => x.id === +body.tech_id) || {}).name || null; }
       o.updated_at = now(); syncList(r, o); return ok(o);
+    }
+    if ((m = path.match(/^\/api\/refs\/(\w+)$/))) {
+      const f = r.me.ref, k = m[1], items = body.items || [];
+      if (!["owner", "admin"].includes(me(r).role)) return err(403, "Только для владельца и администратора");
+      if (k === "parts") { const out = items.filter((x) => (x.n || "").trim()).map((x) => [x.k || "c" + (++nextId), x.n.trim()]);
+        out.forEach(([pk, n]) => (f.parts_all[pk] = n)); f.parts = out; return ok(out.map(([pk, n]) => ({ k: pk, n }))); }
+      const uniq = [...new Set(items.map((x) => String(x).trim()).filter(Boolean))];
+      if (k === "stages") f.stage_lib = uniq; else f[k] = uniq;
+      return ok(uniq);
+    }
+    if ((m = path.match(/^\/api\/catalog\/(\d+)$/))) {
+      const f = r.me.ref, c = f.catalog.find((x) => x.id === +m[1]), c2 = Array.isArray(r.catalog) ? r.catalog.find((x) => x.id === +m[1]) : null;
+      for (const x of [c, c2]) if (x) Object.assign(x, body);
+      if (body.stages) body.stages.forEach((n) => { if (!f.stage_lib.includes(n)) f.stage_lib.push(n); });
+      return ok(c2 || c || { ok: true });
     }
     if (path === "/api/ai/chat") { const h = body.history || []; const last = h.length ? h[h.length - 1] : {}; return ok({ reply: aiAnswer(r, last.content || "") }); }
     if (path === "/api/ai/parse") return err(400, "В демо распознавание фото наряда недоступно. В рабочей системе ИИ заполняет форму по фото бумажного бланка.");

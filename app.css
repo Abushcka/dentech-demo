@@ -178,15 +178,6 @@ textarea.input{height:auto;min-height:72px;padding:10px 12px;resize:vertical}
 .stage .snote{font-size:13px;background:var(--surface-2);border-radius:8px;padding:6px 10px;margin-top:6px}
 
 /* зубная формула */
-.teeth{display:grid;grid-template-columns:repeat(16,minmax(0,1fr));gap:3px;user-select:none}
-.teeth .mid{grid-column:span 16;height:1px;background:var(--sep);margin:3px 0}
-.tooth{height:40px;border-radius:8px;border:0;background:var(--surface-2);font-size:12px;font-weight:600;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:0;color:var(--label)}
-.tooth:nth-child(8),.tooth:nth-child(25){margin-right:6px}
-.tooth.sel{background:var(--accent);color:var(--accent-ink)}
-.tooth.has{box-shadow:inset 0 -3px 0 var(--c,var(--accent))}
-.tooth small{font-size:9px;font-weight:500;opacity:.8;max-width:100%;overflow:hidden;white-space:nowrap}
-.teeth.ro .tooth{cursor:default}
-@media (max-width:520px){.tooth{height:34px;font-size:10.5px;border-radius:6px}.teeth{gap:2px}.tooth:nth-child(8),.tooth:nth-child(25){margin-right:3px}}
 .works{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
 .work{border:0;border-radius:10px;background:var(--surface-2);padding:9px 10px;text-align:left;cursor:pointer;font-weight:500;font-size:13.5px;line-height:1.2}
 .work small{display:block;color:var(--label-2);font-weight:400;font-size:11.5px;margin-top:2px}
@@ -295,3 +286,31 @@ table.t input.input{height:34px;min-width:70px}
 .billwarn{margin:0 24px 8px;padding:10px 14px;border-radius:10px;background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--label);font-size:14px}
 @media (max-width:899px){.billwarn{margin:0 16px 8px}}
 .toolbar select.input{flex:1;min-width:140px}
+.note-box{background:var(--surface-2);border-radius:12px;padding:12px;font-size:14px;line-height:1.45}
+.note-box.ok{background:color-mix(in srgb,var(--ok) 12%,transparent)}
+/* зубная формула — дуги челюстей */
+.odo{max-width:440px;margin:0 auto;user-select:none;-webkit-tap-highlight-color:transparent}
+.odo svg{width:100%;height:auto;display:block;overflow:visible}
+.odo .tooth{cursor:pointer;outline:none}
+.odo.ro .tooth{cursor:default}
+.odo .tooth .body{fill:var(--surface);stroke:var(--label-3);stroke-width:1.4;transition:fill .15s,stroke .15s}
+.odo .tooth .ln{fill:none;stroke:var(--label-3);stroke-width:1.1;stroke-linecap:round}
+.odo .tooth .num{font-size:10.5px;font-weight:600;fill:var(--label-2);text-anchor:middle;font-variant-numeric:tabular-nums}
+.odo:not(.ro) .tooth:hover .body,.odo .tooth:focus-visible .body{stroke:var(--accent);stroke-width:2}
+.odo .tooth.has .body{fill:color-mix(in srgb,var(--c) 30%,var(--surface));stroke:var(--c);stroke-width:2}
+.odo .tooth.has .ln{stroke:color-mix(in srgb,var(--c) 70%,transparent)}
+.odo .tooth.has .num{fill:var(--c);font-weight:800}
+.odo .tooth.sel .body{fill:var(--accent);stroke:var(--accent)}
+.odo .tooth.sel .ln{stroke:rgba(255,255,255,.75)}
+.odo .tooth.sel .num{fill:var(--accent);font-weight:800}
+.odo .midline{stroke:var(--sep);stroke-width:1;stroke-dasharray:3 4}
+.odo .jaw{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;fill:var(--label-3);text-anchor:middle}
+.odo .sidelbl{font-size:11px;font-weight:600;fill:var(--label-2);text-anchor:middle}
+.odo .q{font-size:10px;font-weight:700;fill:var(--label-3);text-anchor:middle}
+.stchips{border:0;background:var(--surface-2);border-radius:9px;padding:6px 10px;cursor:pointer;display:flex;flex-wrap:wrap;gap:4px;align-items:center;text-align:left;font:inherit;font-size:12.5px;min-width:240px;color:var(--label)}
+.stchips span{background:var(--surface);border-radius:6px;padding:2px 7px}
+.stchips i{font-style:normal;color:var(--label-3)}
+.stchips:hover{box-shadow:inset 0 0 0 1.5px var(--accent)}
+.mk-n{width:22px;height:22px;border-radius:50%;background:var(--surface-3);display:grid;place-items:center;font-size:12px;font-weight:700;flex:none}
+.sheet .pills .pill{background:var(--surface)}
+table.t select.input{min-width:128px}

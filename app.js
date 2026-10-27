@@ -63,7 +63,7 @@ const I = {
   board: '<rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="11" rx="1.5"/><rect x="17" y="4" width="4" height="7" rx="1.5"/>',
   tooth: '<path d="M7 3c-2.5 0-4 2-4 4.5 0 3 1.5 4 2 7.5.5 3.5 1 6 2.5 6s1.5-4 2.5-6c.5-1 1.5-1 2 0 1 2 1 6 2.5 6s2-2.5 2.5-6c.5-3.5 2-4.5 2-7.5C21 5 19.5 3 17 3c-2 0-3 1-5 1S9 3 7 3z"/>',
   file: '<path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5"/>',
-  check: '<path d="M5 12.5 10 17 19 7"/>', watch: '<rect x="6" y="6" width="12" height="12" rx="3"/><path d="M9 6l1-3h4l1 3M9 18l1 3h4l1-3M12 9.5V12l1.5 1.5"/>',
+  check: '<path d="M5 12.5 10 17 19 7"/>', dl: '<path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/>', chev: '<path d="m9 6 6 6-6 6"/>', watch: '<rect x="6" y="6" width="12" height="12" rx="3"/><path d="M9 6l1-3h4l1 3M9 18l1 3h4l1-3M12 9.5V12l1.5 1.5"/>',
 };
 const ic = (n, s = 20) => `<svg class="i" viewBox="0 0 24 24" style="width:${s}px;height:${s}px">${I[n] || ""}</svg>`;
 
@@ -85,7 +85,7 @@ async function act(fn, okMsg) {
   try { const r = await fn(); if (okMsg) toast(okMsg); haptic(); return r; }
   catch (e) { toast("⚠️ " + e.message, 4000); throw e; }
 }
-const fileUrl = (id, dl) => `/api/files/${id}?t=${encodeURIComponent(S.token)}${dl ? "&dl=1" : ""}`;
+const fileUrl = (id, dl) => window.DEMO_URL ? window.DEMO_URL(id, dl) : `/api/files/${id}?t=${encodeURIComponent(S.token)}${dl ? "&dl=1" : ""}`;
 
 /* ---------- вход ---------- */
 function setToken(t) { S.token = t; try { t ? localStorage.setItem("dt_token", t) : localStorage.removeItem("dt_token"); } catch (e) {} }
@@ -417,7 +417,7 @@ function dnd(box) {
 /* ---------- карточка работы ---------- */
 async function vOrder(id) {
   const o = await api("/api/orders/" + id);
-  S.cur = o;
+  S.cur = o; S.fml = 0;
   const acts = [];
   acts.push(`<button class="icon-btn" title="Печать наряда" onclick="printOrder()">${ic("print", 18)}</button>`);
   if (isMgr() || (isClient() && o.status === "new") || S.me.role === "tech") acts.push(`<button class="icon-btn" title="Изменить" onclick="go('edit/${o.id}')">${ic("edit", 18)}</button>`);
@@ -467,7 +467,7 @@ function infoHtml(o) {
   const teethMap = {};
   o.items.forEach((it, i) => (it.teeth || "").split(/\s+/).filter(Boolean).forEach((t) => (teethMap[t] = { name: it.name, c: COLORS[i % COLORS.length] })));
   return `
-  <div class="sec">Зубная формула и работы</div><div class="card">${teethHtml(teethMap, true)}
+  <div class="sec">Зубная формула и работы${o.files.some((f) => is3d(f) || isZip(f)) ? `<div class="seg" id="fmlSeg" style="margin-left:auto;text-transform:none;letter-spacing:0"><button class="on" onclick="fmlTab(0)">Формула</button><button onclick="fmlTab(1)">${ic("tooth", 14)} 3D-модель</button></div>` : ""}</div><div class="card"><div id="fmlBox">${teethHtml(teethMap, true)}</div>
     <div class="group items" style="margin-top:12px;background:var(--surface-2)">${o.items.map((it, i) => `<div class="row"><span class="dot" style="--c:${COLORS[i % COLORS.length]}"></span><div class="grow"><div class="t">${esc(it.name)}</div><div class="s">${it.teeth ? "зубы " + esc(it.teeth) : "без указания зубов"} · ${it.qty} шт</div></div>
       ${it.sum != null ? `<div class="r money">${money(it.sum)}</div>` : ""}</div>`).join("")}
       ${o.total != null ? `<div class="row"><div class="grow t">Итого${o.discount_pct ? ` <span class="muted small">скидка ${o.discount_pct}%</span>` : ""}</div><div class="r money" style="font-weight:700">${money(o.total)}</div></div>` : ""}
@@ -560,7 +560,7 @@ function filesHtml(o) {
 async function reloadOrder() {
   const o = await api("/api/orders/" + S.cur.id); S.cur = o;
   $("#headBox").innerHTML = headHtml(o);
-  $("#infoBox").innerHTML = infoHtml(o);
+  if (!(S.fml && S.fmlFiles === o.files.length && $("#fml3d"))) { S.fml = 0; $("#infoBox").innerHTML = infoHtml(o); }
   $("#stagesBox").innerHTML = stagesHtml(o);
   $("#filesBox").innerHTML = filesHtml(o);
 }
@@ -597,7 +597,7 @@ async function aiSummary() {
 /* ---------- чат работы ---------- */
 function chatHtml(o) {
   const ppl = (o.people || []).map((p) => av(p.id, p.name + (p.tg ? " · Telegram" : ""), "sm")).join("");
-  return `<div class="chat"><div class="ch">${ic("send", 18)} Чат работы <span style="flex:1"></span><span style="display:flex;gap:2px">${ppl}</span></div>
+  return `<div class="chat"><div class="ch link" onclick="chatInfo()" title="Участники, медиа и файлы">${ic("send", 18)}<div class="grow" style="min-width:0"><div>Чат работы №${o.number}</div><div class="tiny muted" style="font-weight:400">${(o.people || []).length} участник(ов) · медиа и файлы</div></div><span class="chppl">${ppl}</span>${ic("chev", 16)}</div>
     <div class="msgs" id="msgs"></div>
     ${isLab() ? `<label class="intt"><span class="switch" style="transform:scale(.7);margin:-6px -8px"><input type="checkbox" id="intn" onchange="$('.composer').classList.toggle('int',this.checked)"><i></i></span>${ic("lock", 14)} Внутренняя заметка (клиника не видит)</label>` : ""}
     <div class="composer"><button class="icon-btn" title="Файл" onclick="$('#fpick').click()">${ic("clip", 18)}</button>
@@ -642,7 +642,7 @@ function msgHtml(m) {
     const img = /^image\//.test(m.file_mime || "");
     const fo = JSON.stringify({ id: m.file_id, name: m.file_name, mime: m.file_mime }).replace(/'/g, "&#39;");
     f = img ? `<img src="${fileUrl(m.file_id)}" loading="lazy" onclick='openFile(${fo})' alt="">` :
-      `<a class="file" onclick='openFile(${fo})'>${ic("file", 18)}<span>${esc(m.file_name)}<br><span class="tiny">${((m.file_size || 0) / 1048576).toFixed(1)} МБ</span></span></a>`;
+      `<a class="file" onclick='openFile(${fo})'>${fbadge({ name: m.file_name })}<span>${esc(m.file_name)}<br><span class="tiny">${fsize(m.file_size)}${fkind({ name: m.file_name, mime: m.file_mime }) ? " · " + fkind({ name: m.file_name, mime: m.file_mime }) : ""}</span></span></a>`;
   }
   const src = m.source === "telegram" ? " · TG" : m.source === "whatsapp" ? " · WA" : m.source === "api" ? " · API" : "";
   return `<div class="msg ${mine ? "me" : ""} ${m.kind === "internal" ? "int" : ""}">${!mine ? `<div class="a">${esc(m.author)}${m.role === "doctor" || m.role === "clinic" ? " · клиника" : ""}</div>` : ""}
@@ -666,44 +666,222 @@ async function uploadFiles(files) {
   const fp = $("#fpick"); if (fp) fp.value = "";
 }
 
-/* ---------- просмотр файлов: фото, PDF, 3D ---------- */
-function openFile(f) {
-  const ext = (f.name.split(".").pop() || "").toLowerCase();
-  const dl = `<a class="btn" href="${fileUrl(f.id, 1)}" download>Скачать</a>`;
-  if (/^image\//.test(f.mime || "") || ["jpg", "jpeg", "png", "webp", "gif"].includes(ext))
-    return sheet(f.name, `<div class="viewer"><img src="${fileUrl(f.id)}" alt=""></div>`, { wide: true, foot: dl });
-  if (ext === "pdf") return sheet(f.name, `<div class="viewer"><iframe src="${fileUrl(f.id)}"></iframe></div>`, { wide: true, foot: dl });
-  if (["stl", "ply", "obj"].includes(ext)) {
-    const s = sheet(f.name, `<div class="viewer" id="v3d"><div class="spin"></div><div class="hint">Вращение — палец/мышь, масштаб — щипок/колесо</div></div>`, { wide: true, foot: dl });
-    view3d(f, ext, $("#v3d"), s); return;
+/* ---------- просмотр файлов: фото, PDF, текст, 3D (несколько моделей), ZIP ---------- */
+const extOf = (n) => (String(n || "").split(".").pop() || "").toLowerCase();
+const IMG_EXT = ["jpg", "jpeg", "png", "webp", "gif", "bmp"], M3D = ["stl", "ply", "obj"], TXT_EXT = ["txt", "xml", "json", "csv", "log", "ini", "md"];
+const isImg = (f) => IMG_EXT.includes(extOf(f.name)) || (/^image\//.test(f.mime || "") && !["heic", "heif", "tif", "tiff"].includes(extOf(f.name)));
+const is3d = (f) => M3D.includes(extOf(f.name));
+const isZip = (f) => extOf(f.name) === "zip";
+const zipUrl = (fid, n, dl) => window.DEMO_ZURL ? window.DEMO_ZURL(fid, n, dl) : `/api/files/${fid}/zip/${n}?t=${encodeURIComponent(S.token)}${dl ? "&dl=1" : ""}`;
+const fsize = (b) => (b || 0) >= 1048576 ? ((b / 1048576).toFixed(b >= 10485760 ? 0 : 1) + " МБ") : Math.max(1, Math.round((b || 0) / 1024)) + " КБ";
+const fkind = (f) => isZip(f) ? "архив — нажмите, чтобы посмотреть" : is3d(f) ? "3D-модель" : extOf(f.name) === "pdf" ? "PDF" : isImg(f) ? "фото" : "";
+const fbadge = (f) => `<span class="fbadge ${isZip(f) ? "zip" : is3d(f) ? "m3" : ""}">${esc(extOf(f.name).toUpperCase().slice(0, 4) || "FILE")}</span>`;
+/* f: {id, name, mime} — файл работы; или {name, url, dlUrl} — файл из архива / ещё не загруженный. back — куда вернуться */
+function openFile(f, back, extra = "") {
+  const ext = extOf(f.name), src = f.url || fileUrl(f.id), dl = f.dlUrl || (f.url ? f.url : fileUrl(f.id, 1));
+  S._back = back || null;
+  const foot = `${back ? `<button class="btn" onclick="S._back&&S._back()">${ic("back", 16)} Назад</button>` : ""}<span style="flex:1"></span>${extra}<a class="btn" href="${dl}" download="${esc(f.name)}">Скачать</a>`;
+  const show = (body) => sheet(f.name, body, { wide: true, foot });
+  if (isImg(f)) return show(`<div class="viewer"><img src="${src}" alt=""></div>`);
+  if (ext === "pdf") return show(`<div class="viewer"><iframe src="${src}"></iframe></div>`);
+  if (M3D.includes(ext)) { const s = show(`<div class="viewer" id="v3d"></div>`); view3d([{ url: src, ext, name: f.name }], $("#v3d"), s); return s; }
+  if (ext === "zip" && f.id && !f.url) return openZip(f);
+  if (TXT_EXT.includes(ext)) {
+    const s = show(`<pre class="txtview" id="txv"><div class="spin"></div></pre>`);
+    fetch(src).then((r) => r.text()).then((t) => { const b = $("#txv"); if (b) b.textContent = t.slice(0, 400000); }).catch(() => {});
+    return s;
   }
-  location.href = fileUrl(f.id, 1);
+  return show(`<div class="empty"><b>${esc(ext.toUpperCase() || "Файл")}</b>Этот тип файла не открывается в браузере — скачайте его и откройте в своей программе.</div>`);
 }
-async function view3d(f, ext, box, sh) {
+/* 3D: одна или несколько моделей в общей сцене (верх/низ/прикус из сканера совпадают по координатам).
+   list: [{url, ext, name, on?, size?}] — выключенные модели грузятся только при включении */
+async function view3d(list, box, sh) {
+  box.innerHTML = `<div class="spin"></div><div class="hint" id="v3h">Загружаю модель…</div>`;
+  let alive = true;
+  if (sh) { const prev = sh._onClose; sh._onClose = () => { alive = false; prev && prev(); }; }
   try {
     const THREE = await import("three");
     const { OrbitControls } = await import("three/addons/controls/OrbitControls.js");
-    const L = ext === "stl" ? (await import("three/addons/loaders/STLLoader.js")).STLLoader : ext === "ply" ? (await import("three/addons/loaders/PLYLoader.js")).PLYLoader : (await import("three/addons/loaders/OBJLoader.js")).OBJLoader;
-    const buf = await (await fetch(fileUrl(f.id))).arrayBuffer();
-    let obj;
-    const mat = new THREE.MeshStandardMaterial({ color: 0xf1e9dc, roughness: 0.55, metalness: 0.05 });
-    if (ext === "obj") { obj = new L().parse(new TextDecoder().decode(buf)); obj.traverse((c) => c.isMesh && (c.material = mat)); }
-    else { const g = new L().parse(buf); g.computeVertexNormals(); obj = new THREE.Mesh(g, g.attributes.color ? new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .6 }) : mat); }
-    box.querySelector(".spin")?.remove();
-    const w = box.clientWidth, h = box.clientHeight;
+    const LD = {
+      stl: async () => (await import("three/addons/loaders/STLLoader.js")).STLLoader,
+      ply: async () => (await import("three/addons/loaders/PLYLoader.js")).PLYLoader,
+      obj: async () => (await import("three/addons/loaders/OBJLoader.js")).OBJLoader,
+    };
+    const PAL = [0xf1e9dc, 0xe9c6bc, 0xbfd5ea, 0xd4e6c3, 0xe2d2ef, 0xf1dea9, 0xc9e6e3];
+    if (!list.some((x) => x.on)) { let sum = 0; list.forEach((x, k) => { x.on = k === 0 || (sum + (x.size || 0) < 150 * 1048576 && k < 6); sum += x.size || 0; }); }
     const scene = new THREE.Scene(); scene.background = new THREE.Color(0x1a1d21);
-    const cam = new THREE.PerspectiveCamera(40, w / h, 0.1, 5000);
-    const rend = new THREE.WebGLRenderer({ antialias: true }); rend.setPixelRatio(Math.min(2, devicePixelRatio)); rend.setSize(w, h);
-    box.prepend(rend.domElement);
+    const cam = new THREE.PerspectiveCamera(40, 1, 0.1, 10000);
+    const rend = new THREE.WebGLRenderer({ antialias: true }); rend.setPixelRatio(Math.min(2, devicePixelRatio));
     scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.1));
-    const dl = new THREE.DirectionalLight(0xffffff, 1.4); dl.position.set(1, 2, 3); scene.add(dl);
-    const b = new THREE.Box3().setFromObject(obj), c = b.getCenter(new THREE.Vector3()), sz = b.getSize(new THREE.Vector3()).length();
-    obj.position.sub(c); scene.add(obj);
-    cam.position.set(0, -sz * 0.2, sz * 1.1); cam.lookAt(0, 0, 0);
+    const dl = new THREE.DirectionalLight(0xffffff, 1.3); cam.add(dl); dl.position.set(0.5, 1, 1); scene.add(cam);
+    const group = new THREE.Group(); scene.add(group);
     const ctl = new OrbitControls(cam, rend.domElement); ctl.enableDamping = true;
-    let alive = true; sh._onClose = () => { alive = false; rend.dispose(); };
-    (function loop() { if (!alive) return; ctl.update(); rend.render(scene, cam); requestAnimationFrame(loop); })();
-  } catch (e) { box.innerHTML = `<div class="hint" style="position:static;color:#ddd">Не удалось показать 3D: ${esc(e.message)}. Скачайте файл.</div>`; }
+    let fitted = false, translucent = false, oriented = false;
+    /* сканеры кладут челюсть по разным осям: поворачиваем так, чтобы самая тонкая сторона (высота) смотрела на нас */
+    const orient = () => {
+      const b0 = new THREE.Box3(); group.children.forEach((o) => b0.expandByObject(o)); if (b0.isEmpty()) return;
+      const s3 = b0.getSize(new THREE.Vector3()), ax = ["x", "y", "z"].sort((p, q) => s3[p] - s3[q]);
+      const u = (a) => { const v = new THREE.Vector3(); v[a] = 1; return v; };
+      const ez = u(ax[0]), ey = u(ax[1]), ex = new THREE.Vector3().crossVectors(ey, ez);
+      group.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(ex, ey, ez).invert()); group.updateMatrixWorld(true); oriented = true;
+    };
+    const fit = () => {
+      if (!oriented) orient();
+      const b = new THREE.Box3(); group.children.forEach((o) => o.visible && b.expandByObject(o));
+      if (b.isEmpty()) return;
+      const c = b.getCenter(new THREE.Vector3()), sz = b.getSize(new THREE.Vector3()).length();
+      const vf = cam.fov * Math.PI / 180, hf = 2 * Math.atan(Math.tan(vf / 2) * cam.aspect), dist = (sz / 2) / Math.sin(Math.min(vf, hf) / 2) * 1.05;
+      const dir = new THREE.Vector3(0, -0.25, 1.15).normalize();
+      ctl.target.copy(c); cam.position.copy(c).addScaledVector(dir, dist); cam.near = sz / 100; cam.far = sz * 20; cam.updateProjectionMatrix(); ctl.update();
+    };
+    const load = async (it, k) => {
+      if (it.obj || it.loading) return;
+      it.loading = true; const h = $("#v3h", box); if (h) h.textContent = `Загружаю ${it.name}…`;
+      const L = await LD[it.ext]();
+      const r = await fetch(it.url); if (!r.ok) throw new Error("файл не загрузился (" + r.status + ")");
+      const buf = await r.arrayBuffer();
+      const mat = new THREE.MeshStandardMaterial({ color: PAL[k % PAL.length], roughness: 0.55, metalness: 0.05, side: THREE.DoubleSide });
+      let obj;
+      if (it.ext === "obj") { obj = new L().parse(new TextDecoder().decode(buf)); obj.traverse((c) => c.isMesh && (c.material = mat)); }
+      else { const g = new L().parse(buf); g.computeVertexNormals(); obj = new THREE.Mesh(g, g.attributes.color ? new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, side: THREE.DoubleSide }) : mat); }
+      it.obj = obj; it.mat = mat; it.loading = false; obj.visible = !!it.on; group.add(obj); setTrans();
+      if (h) h.textContent = "Вращение — палец/мышь, масштаб — щипок/колесо";
+    };
+    const setTrans = () => list.forEach((it) => it.obj && it.obj.traverse((c) => { if (c.isMesh) { c.material.transparent = translucent; c.material.opacity = translucent ? 0.55 : 1; c.material.depthWrite = !translucent; } }));
+    for (let k = 0; k < list.length; k++) if (list[k].on) { try { await load(list[k], k); } catch (e) { list[k].err = e.message; list[k].on = false; } if (!alive) return; }
+    if (!list.some((x) => x.obj)) throw new Error(list.find((x) => x.err)?.err || "нет моделей");
+    box.querySelector(".spin")?.remove();
+    box.prepend(rend.domElement);
+    const panel = document.createElement("div"); panel.className = "v3dp";
+    panel.innerHTML = (list.length > 1 ? list.map((it, k) => `<label class="${it.err ? "err" : ""}" title="${esc((it.from ? it.from + " → " : "") + it.name)}"><input type="checkbox" data-k="${k}" ${it.on ? "checked" : ""}><i style="background:#${PAL[k % PAL.length].toString(16)}"></i><span>${esc(it.name)}</span></label>`).join("") : "") +
+      `<div class="v3db"><button type="button" data-a="fit">Вид</button><button type="button" data-a="tr">Прозрачно</button></div>`;
+    box.appendChild(panel);
+    panel.onchange = async (e) => {
+      const k = +e.target.dataset.k, it = list[k]; it.on = e.target.checked;
+      if (it.on && !it.obj) { try { await load(it, k); } catch (er) { toast("⚠️ " + er.message); it.on = false; e.target.checked = false; } }
+      if (it.obj) it.obj.visible = it.on;
+    };
+    panel.onclick = (e) => { const a = e.target.dataset?.a; if (a === "fit") fit(); if (a === "tr") { translucent = !translucent; e.target.classList.toggle("on", translucent); setTrans(); } };
+    const size = () => { const w = box.clientWidth, h = box.clientHeight; if (!w || !h) return; rend.setSize(w, h); cam.aspect = w / h; cam.updateProjectionMatrix(); };
+    size(); fit(); fitted = true;
+    const ro = new ResizeObserver(size); ro.observe(box);
+    (function loop() {
+      if (!alive || !rend.domElement.isConnected) { ro.disconnect(); ctl.dispose(); rend.dispose(); list.forEach((it) => it.obj && it.obj.traverse((c) => c.geometry && c.geometry.dispose())); return; }
+      ctl.update(); rend.render(scene, cam); requestAnimationFrame(loop);
+    })();
+  } catch (e) { box.innerHTML = `<div class="hint" style="position:static;color:#ddd;padding:20px">Не удалось показать 3D: ${esc(e.message)}. Скачайте файл.</div>`; }
+}
+/* ZIP: содержимое архива прямо в программе — фото, PDF, STL, текст; все 3D-модели архива вместе */
+async function openZip(f) {
+  S.zip = { f, d: null };
+  sheet(f.name, `<div id="zipBox"><div class="spin"></div></div>`, { wide: true, foot: `<span class="small muted grow">Архив ${fsize(f.size || 0)}</span><a class="btn" href="${fileUrl(f.id, 1)}" download>Скачать архив</a>` });
+  let d; try { d = await api(`/api/files/${f.id}/zip`); } catch (e) { const b = $("#zipBox"); if (b) b.innerHTML = `<div class="empty"><b>Не удалось открыть архив</b>${esc(e.message)}</div>`; return; }
+  S.zip.d = d; const b = $("#zipBox"); if (!b) return;
+  const m3 = d.entries.filter(is3d), total = d.entries.reduce((s, e) => s + e.size, 0);
+  b.innerHTML = `<div class="toolbar" style="margin-bottom:10px;align-items:center"><span class="small muted grow">${d.entries.length} файл(ов) · ${fsize(total)} в распакованном виде</span>
+      ${m3.length ? `<button class="btn sm primary" onclick="zip3dAll()">${ic("tooth", 16)} 3D: ${m3.length > 1 ? "все модели вместе (" + m3.length + ")" : "открыть модель"}</button>` : ""}</div>
+    ${d.entries.length ? `<div class="group">${d.entries.map((e) => {
+      const parts = e.name.split("/"), nm = parts.pop(), dir = parts.join(" / ");
+      return `<div class="row link" onclick="zipOpen(${e.i})">${isImg(e) ? `<img class="zthumb" loading="lazy" src="${zipUrl(f.id, e.i)}" alt="">` : fbadge(e)}
+        <div class="grow" style="min-width:0"><div class="t ell">${esc(nm)}${e.enc ? " 🔒" : ""}</div><div class="s ell">${dir ? esc(dir) + " · " : ""}${fsize(e.size)}${fkind(e) ? " · " + fkind(e) : ""}</div></div>
+        <a class="icon-btn" title="Скачать" href="${zipUrl(f.id, e.i, 1)}" download onclick="event.stopPropagation()">${ic("dl", 16)}</a></div>`; }).join("")}</div>` : `<div class="empty"><b>Архив пустой</b></div>`}`;
+}
+function zipOpen(n) {
+  const { f, d } = S.zip, e = d.entries.find((x) => x.i === n), nm = e.name.split("/").pop();
+  if (e.enc) return toast("Файл защищён паролем — скачайте архив целиком", 4000);
+  openFile({ name: nm, url: zipUrl(f.id, n), dlUrl: zipUrl(f.id, n, 1) }, () => openZip(f),
+    S.cur ? `<button class="btn" onclick="zipExtract(${n})" title="Сохранить отдельным файлом в работу">В файлы работы</button>` : "");
+}
+function zip3dAll() {
+  const { f, d } = S.zip;
+  const list = d.entries.filter(is3d).map((e) => ({ url: zipUrl(f.id, e.i), ext: extOf(e.name), name: e.name.split("/").pop(), size: e.size }));
+  S._back = () => openZip(f);
+  const s = sheet(f.name + " · 3D", `<div class="viewer tall" id="v3d"></div>`, { wide: true, foot: `<button class="btn" onclick="S._back()">${ic("back", 16)} К архиву</button>` });
+  view3d(list, $("#v3d"), s);
+}
+async function zipExtract(n) {
+  await act(() => api(`/api/files/${S.zip.f.id}/zip/${n}/extract`, { body: {} }), "Добавлено в файлы работы");
+  if (S.cur && $("#filesBox")) { reloadOrder(); pollChat(); }
+}
+
+/* ---------- карточка чата: участники, медиа, файлы ---------- */
+async function chatInfo(tab = "people") {
+  const o = S.cur; if (!o) return;
+  const nImg = o.files.filter(isImg).length, nOther = o.files.length - nImg;
+  sheet(`Чат работы №${o.number}`, `<div class="cihead">${av(o.id + 7, o.patient || "№" + o.number, "lg")}<div class="grow"><div class="t">${esc(o.patient || "Без пациента")} · №${o.number}</div>
+      <div class="s">${esc(o.clinic_name || "")}${o.doctor_name ? " · " + esc(o.doctor_name) : ""}</div><div style="margin-top:4px">${stChip(o.status)}</div></div></div>
+    <div class="seg" id="ciTabs" style="width:100%;margin:12px 0"><button data-t="people" style="flex:1">Участники</button><button data-t="media" style="flex:1">Медиа ${nImg || ""}</button><button data-t="files" style="flex:1">Файлы ${nOther || ""}</button></div>
+    <div id="ciBody"></div>`);
+  $$("#ciTabs button").forEach((b) => b.onclick = () => ciPaint(b.dataset.t));
+  ciPaint(tab);
+}
+async function ciPaint(tab) {
+  S.ciTab = tab;
+  $$("#ciTabs button").forEach((b) => b.classList.toggle("on", b.dataset.t === tab));
+  const box = $("#ciBody"), o = S.cur; if (!box) return;
+  const back = () => chatInfo(tab);
+  if (tab === "media") {
+    const im = o.files.filter(isImg).reverse();
+    box.innerHTML = im.length ? `<div class="mgrid">${im.map((f) => `<img loading="lazy" src="${fileUrl(f.id)}" alt="" title="${esc(f.name)} · ${fdate(f.created_at)}" onclick='ciOpen(${f.id})'>`).join("")}</div>`
+      : `<div class="empty"><b>Фото пока нет</b>Фото из чата и файлов работы появятся здесь</div>`;
+    S._ciBack = back; return;
+  }
+  if (tab === "files") {
+    const fl = o.files.filter((f) => !isImg(f)).reverse(), m3 = o.files.filter(is3d);
+    box.innerHTML = (m3.length > 1 ? `<button class="btn sm" style="margin-bottom:10px" onclick="files3dAll()">${ic("tooth", 16)} Все 3D-модели работы вместе (${m3.length})</button>` : "") +
+      (fl.length ? `<div class="group">${fl.map((f) => `<div class="row link" onclick='ciOpen(${f.id})'>${fbadge(f)}<div class="grow" style="min-width:0"><div class="t ell">${esc(f.name)}</div>
+        <div class="s">${fsize(f.size)}${fkind(f) ? " · " + fkind(f) : ""} · ${esc(f.author || "")} · ${fdate(f.created_at)}</div></div>
+        <a class="icon-btn" title="Скачать" href="${fileUrl(f.id, 1)}" download onclick="event.stopPropagation()">${ic("dl", 16)}</a></div>`).join("")}</div>`
+        : `<div class="empty"><b>Файлов пока нет</b>Сканы STL, архивы ZIP, PDF — всё, что отправят в чат</div>`);
+    S._ciBack = back; return;
+  }
+  box.innerHTML = `<div class="spin"></div>`;
+  let r; try { r = await api(`/api/orders/${o.id}/members`); } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  ciPeople(r);
+}
+function ciPeople(r) {
+  const box = $("#ciBody"); if (!box) return;
+  const row = (p) => `<div class="row">${av(p.id, p.name)}<div class="grow" style="min-width:0"><div class="t ell">${esc(p.name)}${p.id === S.me.id ? ' <span class="muted small">(вы)</span>' : ""}</div>
+      <div class="s">${esc(p.why)}${p.why !== p.role_name ? " · " + esc(p.role_name) : ""} · ${p.tg ? "Telegram ✓" : "без Telegram"}</div></div>
+      ${p.phone && isLab() ? `<a class="icon-btn" title="WhatsApp" target="_blank" href="https://wa.me/${p.phone.replace(/\D/g, "")}">${ic("wa", 16)}</a>` : ""}
+      ${p.added ? `<button class="icon-btn" title="Убрать из чата" onclick="ciDel(${p.id})">${ic("x", 14)}</button>` : ""}</div>`;
+  const lab = r.members.filter((p) => p.side === "lab"), cl = r.members.filter((p) => p.side !== "lab");
+  box.innerHTML = `<div class="sec" style="margin-top:4px">Лаборатория · ${lab.length}</div><div class="group">${lab.map(row).join("") || '<div class="row muted">—</div>'}</div>
+    <div class="sec">Клиника · ${cl.length}</div><div class="group">${cl.map(row).join("") || '<div class="row muted">—</div>'}</div>
+    <div class="sec">Добавить участника</div>
+    ${r.candidates.length ? `<input class="input" id="ciQ" placeholder="Поиск по имени…" style="margin-bottom:8px"><div class="group" id="ciCand"></div>` : `<div class="small muted">Все, кого можно добавить, уже в чате.</div>`}
+    <p class="tiny muted" style="margin-top:12px">Участники получают сообщения этой работы в Telegram и могут отвечать прямо из уведомления. Врач или клиника, добавленные в чат, видят эту работу у себя.</p>`;
+  const paintC = () => {
+    const q = ($("#ciQ")?.value || "").trim().toLowerCase();
+    const c = r.candidates.filter((x) => !q || x.name.toLowerCase().includes(q));
+    $("#ciCand").innerHTML = c.slice(0, 40).map((x) => `<div class="row link" onclick="ciAdd(${x.id})">${av(x.id, x.name, "sm")}<div class="grow"><div class="t">${esc(x.name)}</div><div class="s">${esc(x.role_name)}${x.clinic_name ? " · " + esc(x.clinic_name) : ""}</div></div><span class="btn sm">${ic("plus", 14)} Добавить</span></div>`).join("") || '<div class="row muted">Никого не найдено</div>';
+  };
+  if ($("#ciQ")) { $("#ciQ").oninput = paintC; paintC(); }
+}
+async function ciAdd(uid) { const r = await act(() => api(`/api/orders/${S.cur.id}/members`, { body: { user_id: uid } }), "Добавлен в чат"); ciPeople(r); reloadOrder(); pollChat(); }
+async function ciDel(uid) { if (!confirm("Убрать участника из чата работы?")) return; const r = await act(() => api(`/api/orders/${S.cur.id}/members/${uid}`, { method: "DELETE" })); ciPeople(r); reloadOrder(); pollChat(); }
+function ciOpen(fid) { const f = S.cur.files.find((x) => x.id === fid); if (f) openFile(f, S._ciBack); }
+function files3dAll() {
+  const list = S.cur.files.filter(is3d).map((f) => ({ url: fileUrl(f.id), ext: extOf(f.name), name: f.name, size: f.size }));
+  const s = sheet(`№${S.cur.number} · 3D`, `<div class="viewer tall" id="v3d"></div>`, { wide: true });
+  view3d(list, $("#v3d"), s);
+}
+
+/* ---------- зубная формула ⇄ 3D-модель из файлов работы (STL/PLY/OBJ и STL внутри ZIP) ---------- */
+function teethMapOf(o) { const m = {}; o.items.forEach((it, i) => (it.teeth || "").split(/\s+/).filter(Boolean).forEach((t) => (m[t] = { name: it.name, c: COLORS[i % COLORS.length] }))); return m; }
+async function fmlTab(k) {
+  const o = S.cur, box = $("#fmlBox"); if (!box) return;
+  S.fml = k; S.fmlFiles = o.files.length;
+  $$("#fmlSeg button").forEach((b, i) => b.classList.toggle("on", i === k));
+  if (!k) { box.innerHTML = teethHtml(teethMapOf(o), true); return; }
+  box.innerHTML = `<div class="fml3"><div class="fml3f">${teethHtml(teethMapOf(o), true)}</div><div class="viewer tall" id="fml3d"><div class="spin"></div></div></div>`;
+  const src = o.files.filter(is3d).map((f) => ({ url: fileUrl(f.id), ext: extOf(f.name), name: f.name, size: f.size }));
+  for (const z of o.files.filter(isZip)) {
+    try { const d = await api(`/api/files/${z.id}/zip`); d.entries.filter((e) => is3d(e) && !e.enc).forEach((e) => src.push({ url: zipUrl(z.id, e.i), ext: extOf(e.name), name: e.name.split("/").pop(), size: e.size, from: z.name })); } catch (e) {}
+  }
+  const v = $("#fml3d"); if (!v || S.fml !== 1) return;
+  if (!src.length) { v.innerHTML = `<div class="hint" style="position:static;color:#ccc;padding:20px;text-align:center">В файлах работы нет 3D-моделей (STL, PLY, OBJ — отдельно или в ZIP).<br>Добавьте скан во вкладке «Файлы» или в чат.</div>`; return; }
+  view3d(src, v, null);
 }
 
 /* ---------- новый наряд / изменение ---------- */
@@ -713,20 +891,18 @@ async function vNew(editId) {
   const F = S.form = o ? {
     id: o.id, clinic_id: o.clinic_id, doctor_id: o.doctor_id, patient: o.patient, tech_id: o.tech_id, received_at: (o.received_at || "").slice(0, 10),
     due_at: (o.due_at || "").slice(0, 10), urgent: !!o.urgent, shade: o.shade, need_photo: !!o.need_photo, implant_system: o.implant_system,
-    parts: o.parts || {}, note: o.note, items: o.items.map((i) => ({ catalog_id: i.catalog_id, name: i.name, teeth: i.teeth, qty: i.qty, price: i.price })), sel: new Set(), number: o.number,
+    parts: o.parts || {}, note: o.note, items: o.items.map((i) => ({ catalog_id: i.catalog_id, name: i.name, teeth: i.teeth, qty: i.qty, price: i.price })), sel: new Set(), number: o.number, files: [],
   } : { clinic_id: isClient() ? S.me.clinic_id : (S.f.clinic ? +S.f.clinic : ""), doctor_id: S.me.role === "doctor" ? S.me.id : "", patient: "", tech_id: S.me.role === "tech" ? S.me.id : "",
-    received_at: today(), due_at: "", urgent: false, shade: "", need_photo: false, implant_system: "", parts: {}, note: "", items: [], sel: new Set() };
+    received_at: today(), due_at: "", urgent: false, shade: "", need_photo: false, implant_system: "", parts: {}, note: "", items: [], sel: new Set(), files: [] };
   setTop(o ? `Изменить наряд №${o.number}` : "Новый наряд", { back: true, actions: S.ref.ai && !o ? `<button class="btn" onclick="aiPhoto()">${ic("camera", 18)}<span>По фото наряда</span></button>` : "" });
   const lockItems = o && !(isMgr() || (isClient() && o.status === "new"));
-  const cat = S.ref.catalog, cats = S.ref.categories;
-  const groups = Object.keys(cats).map((k) => [k, cat.filter((c) => c.category === k)]).filter(([, l]) => l.length);
   $("#page").innerHTML = `<div class="split"><div>
     <div class="sec">Заказчик и пациент</div><div class="card"><div class="form">
-      ${isLab() ? `<label class="field"><span>Клиника *</span><select class="input" id="f_clinic"><option value="">— выберите —</option>${S.ref.clinics.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select></label>
-      <label class="field"><span>Врач</span><select class="input" id="f_doctor"></select></label>` : `<div class="field"><span>Клиника</span><b>${esc(S.me.clinic_name || "")}</b></div>`}
+      ${isLab() ? `<label class="field"><span>Клиника * ${qa("qClinic()", "клиника")}</span><select class="input" id="f_clinic"><option value="">— выберите —</option>${S.ref.clinics.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select></label>
+      <label class="field"><span>Врач ${qa("qUser('doctor')", "врач")}</span><select class="input" id="f_doctor"></select></label>` : `<div class="field"><span>Клиника</span><b>${esc(S.me.clinic_name || "")}</b></div>`}
       ${S.me.role === "clinic" ? `<label class="field"><span>Врач</span><select class="input" id="f_doctor"></select></label>` : ""}
       <label class="field"><span>Пациент</span><input class="input" id="f_patient" placeholder="Фамилия И." value="${esc(F.patient)}"></label>
-      ${isLab() ? `<label class="field"><span>Техник</span><select class="input" id="f_tech"><option value="">— не назначен —</option>${S.ref.techs.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}</select></label>
+      ${isLab() ? `<label class="field"><span>Техник ${qa("qUser('tech')", "техник")}</span><select class="input" id="f_tech"><option value="">— не назначен —</option>${S.ref.techs.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}</select></label>
       <label class="field"><span>Дата приёма работы</span><input class="input" type="date" id="f_received" value="${F.received_at}"></label>` : ""}
       <label class="field"><span>Дата сдачи ${isClient() ? "(желаемая)" : ""}</span><input class="input" type="date" id="f_due" value="${F.due_at}" placeholder="по сроку работы"></label>
       ${isMgr() && !o ? `<label class="field"><span>№ наряда (пусто — следующий)</span><input class="input" id="f_number" inputmode="numeric" placeholder="авто"></label>` : ""}
@@ -735,20 +911,23 @@ async function vNew(editId) {
     <div class="sec">Зубная формула · отметьте зубы, затем выберите работу</div>
     <div class="card"><div id="teethBox"></div>
       <div class="small muted" style="margin:10px 0 6px" id="selHint"></div>
-      ${lockItems ? `<p class="small muted">Состав работ меняет лаборатория.</p>` : groups.map(([k, l]) => `<div class="small muted" style="margin:12px 0 6px">${esc(cats[k])}</div><div class="works">${l.map((c) => `<button class="work" type="button" onclick="addWork(${c.id})">${esc(c.name)}<small>${S.ref.units[c.unit] || ""}${c.price != null && c.price ? " · " + money(c.price) : ""}</small></button>`).join("")}</div>`).join("")}
-      ${lockItems ? "" : `<div style="margin-top:10px"><button class="btn sm" type="button" onclick="addCustom()">${ic("plus", 16)} Другая работа</button></div>`}
+      ${lockItems ? `<p class="small muted">Состав работ меняет лаборатория.</p>` : `<div id="worksBox"></div>`}
+      ${lockItems ? "" : `<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" type="button" onclick="addCustom()">${ic("plus", 16)} Другая работа</button>${isMgr() ? `<button class="btn sm" type="button" onclick="addCustom(true)">${ic("tag", 16)} Новая работа в прайс</button>` : ""}</div>`}
     </div>
     <div class="sec">Состав наряда</div><div class="group items" id="itemsBox"></div>
   </div><div>
     <div class="sec">Цвет и детали</div><div class="card"><div class="form" style="grid-template-columns:1fr">
-      <label class="field"><span>Цвет (шкала Vita)</span><input class="input" id="f_shade" value="${esc(F.shade)}" placeholder="A2, BL3…"></label>
-      <div class="pills" id="shades">${(S.ref.shades || []).map((s) => `<button type="button" class="pill" data-s="${s}">${s}</button>`).join("")}</div>
+      <label class="field"><span>Цвет (шкала Vita) ${qa("qRef('shades')", "цвета")}</span><input class="input" id="f_shade" value="${esc(F.shade)}" placeholder="A2, BL3…"></label>
+      <div class="pills" id="shades"></div>
       <label class="field" style="flex-direction:row;align-items:center;justify-content:space-between"><span>Нужно фото (цвет/улыбка)</span><span class="switch"><input type="checkbox" id="f_photo" ${F.need_photo ? "checked" : ""}><i></i></span></label>
-      <div class="field"><span>Система импланта</span><div class="pills" id="impl">${S.ref.implants.map((s) => `<button type="button" class="pill" data-s="${esc(s)}">${esc(s)}</button>`).join("")}</div></div>
+      <div class="field"><span>Система импланта ${qa("qRef('implants')", "системы")}</span><div class="pills" id="impl"></div></div>
     </div></div>
-    <div class="sec">Компоненты · сколько штук от кого</div><div class="card"><div class="parts" id="partsBox"></div></div>
+    <div class="sec">Компоненты · сколько штук от кого ${qa("qRef('parts')", "компоненты")}</div><div class="card"><div class="parts" id="partsBox"></div></div>
     <div class="sec">Примечание</div><div class="card"><textarea class="input" id="f_note" rows="3" placeholder="Пожелания по форме, прикусу, срокам…">${esc(F.note)}</textarea>
-      ${!o ? `<p class="small muted" style="margin:8px 0 0">Сканы, фото и файлы можно добавить в чат работы сразу после создания.</p>` : ""}</div>
+</div>
+    <div class="sec">Файлы · сканы STL, ZIP, фото, PDF, КЛКТ</div><div class="card"><div id="nfList"></div>
+      <div class="drop-zone" id="nfdz">${ic("clip", 18)} Перетащите файлы сюда или нажмите, чтобы выбрать<br><span class="tiny">до ${S.ref.max_upload_mb || 100} МБ каждый · уйдут в чат работы вместе с нарядом</span></div>
+      <input type="file" id="nfpick" multiple class="hidden"></div>
     <div class="card" style="margin-top:16px;display:flex;align-items:center;gap:12px"><div class="grow"><div class="small muted">Итого</div><div style="font-size:22px;font-weight:700" class="money" id="totalBox">—</div></div>
       <button class="btn primary" style="height:48px;padding:0 22px" id="saveBtn" onclick="saveOrder()">${o ? "Сохранить" : "Отправить наряд"}</button></div>
   </div></div>`;
@@ -757,10 +936,89 @@ async function vNew(editId) {
     $("#f_tech").value = F.tech_id || "";
   }
   fillDoctors();
-  $$("#shades .pill").forEach((p) => p.onclick = () => { $("#f_shade").value = p.dataset.s; paintPills(); });
   $("#f_shade").oninput = paintPills;
+  paintRefPills(); paintWorks(); paintTeeth(); paintItems(); paintParts(); paintNewFiles();
+  const dz = $("#nfdz"), pick = $("#nfpick");
+  dz.onclick = () => pick.click(); pick.onchange = () => { addNewFiles(pick.files); pick.value = ""; };
+  ["dragover", "dragenter"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("over"); }));
+  dz.addEventListener("dragleave", () => dz.classList.remove("over"));
+  dz.addEventListener("drop", (e) => { e.preventDefault(); dz.classList.remove("over"); addNewFiles(e.dataTransfer.files); });
+}
+/* быстрые справочники прямо из наряда (владелец/админ) */
+const qa = (call, t) => isMgr() ? `<button type="button" class="qadd" title="Добавить / изменить: ${t}" onclick="event.preventDefault();event.stopPropagation();${call}">${ic("plus", 12)}${t}</button>` : "";
+async function refreshRef() { const r = await api("/api/me"); S.ref = r.ref; }
+function qClinic() {
+  editClinic({}, (c) => {
+    const sel = $("#f_clinic"); if (!sel) return;
+    sel.innerHTML = `<option value="">— выберите —</option>` + S.ref.clinics.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
+    if (c && c.id) { S.form.clinic_id = c.id; S.form.doctor_id = ""; } sel.value = S.form.clinic_id || ""; fillDoctors(); paintItems();
+  });
+}
+function qUser(role) {
+  editUser(null, { role, clinic_id: role === "doctor" ? (+S.form.clinic_id || null) : null }, (u) => {
+    if (role === "doctor") { if (u && u.clinic_id && !S.form.clinic_id && $("#f_clinic")) { S.form.clinic_id = u.clinic_id; $("#f_clinic").value = u.clinic_id; } if (u) S.form.doctor_id = u.id; fillDoctors(); return; }
+    const sel = $("#f_tech"); if (!sel) return; const cur = u ? u.id : sel.value;
+    sel.innerHTML = `<option value="">— не назначен —</option>` + S.ref.techs.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join(""); sel.value = cur || "";
+  });
+}
+function qRef(kind) { editRef(kind, () => { if (kind === "parts") paintParts(); else paintRefPills(); }); }
+function paintRefPills() {
+  const F = S.form;
+  $("#shades").innerHTML = (S.ref.shades || []).map((x) => `<button type="button" class="pill" data-s="${esc(x)}">${esc(x)}</button>`).join("");
+  const impl = [...S.ref.implants]; if (F.implant_system && !impl.includes(F.implant_system)) impl.push(F.implant_system);
+  $("#impl").innerHTML = impl.map((x) => `<button type="button" class="pill" data-s="${esc(x)}">${esc(x)}</button>`).join("");
+  $$("#shades .pill").forEach((p) => p.onclick = () => { $("#f_shade").value = p.dataset.s; paintPills(); });
   $$("#impl .pill").forEach((p) => p.onclick = () => { F.implant_system = F.implant_system === p.dataset.s ? "" : p.dataset.s; paintPills(); });
-  paintPills(); paintTeeth(); paintItems(); paintParts();
+  paintPills();
+}
+function paintWorks() {
+  const box = $("#worksBox"); if (!box) return;
+  const cat = S.ref.catalog, cats = S.ref.categories;
+  box.innerHTML = Object.keys(cats).map((k) => [k, cat.filter((c) => c.category === k)]).filter(([, l]) => l.length).map(([k, l]) => `<div class="small muted" style="margin:12px 0 6px">${esc(cats[k])}</div><div class="works">${l.map((c) => `<button class="work" type="button" onclick="addWork(${c.id})">${esc(c.name)}<small>${S.ref.units[c.unit] || ""}${c.price != null && c.price ? " · " + money(c.price) : ""}</small></button>`).join("")}</div>`).join("");
+}
+/* файлы прямо в новом наряде: выбираются до отправки, загружаются сразу после создания */
+const MAXF = () => (S.ref.max_upload_mb || 100) * 1048576;
+function addNewFiles(list) {
+  const F = S.form;
+  for (const f of [...(list || [])]) {
+    if (f.size > MAXF()) { toast(`⚠️ ${f.name} больше ${S.ref.max_upload_mb || 100} МБ`, 4000); continue; }
+    if (F.files.some((x) => x.name === f.name && x.size === f.size)) continue;
+    F.files.push(f);
+  }
+  haptic(); paintNewFiles();
+}
+function paintNewFiles() {
+  const F = S.form, box = $("#nfList"); if (!box) return;
+  box.innerHTML = F.files.length ? `<div class="group" style="margin-bottom:10px;background:var(--surface-2)">${F.files.map((f, i) => `<div class="row">${fbadge(f)}
+      <div class="grow" style="min-width:0"><div class="t ell">${esc(f.name)}</div><div class="s">${fsize(f.size)}${fkind(f) ? " · " + fkind(f).replace(" — нажмите, чтобы посмотреть", "") : ""}</div></div>
+      ${isImg(f) || is3d(f) || extOf(f.name) === "pdf" ? `<button class="btn sm" type="button" onclick="nfView(${i})">Открыть</button>` : ""}
+      <button class="icon-btn" type="button" title="Убрать" onclick="S.form.files.splice(${i},1);paintNewFiles()">${ic("x", 14)}</button></div>`).join("")}</div>` : "";
+}
+function nfView(i) {
+  const f = S.form.files[i]; if (!f) return;
+  const url = URL.createObjectURL(f);
+  const s = openFile({ name: f.name, mime: f.type, url, dlUrl: url });
+  if (s) { const prev = s._onClose; s._onClose = () => { prev && prev(); setTimeout(() => URL.revokeObjectURL(url), 1000); }; }
+}
+/* загрузка пачками (не больше ~90 МБ за запрос — ограничение сервера), с процентами на кнопке */
+async function uploadPending(oid, files, btn) {
+  const total = files.reduce((s, f) => s + f.size, 0) || 1; let done = 0;
+  const batches = []; let cur = [], sz = 0;
+  for (const f of files) { if (cur.length && (sz + f.size > 90 * 1048576 || cur.length >= 20)) { batches.push(cur); cur = []; sz = 0; } cur.push(f); sz += f.size; }
+  if (cur.length) batches.push(cur);
+  for (let b = 0; b < batches.length; b++) {
+    const fd = new FormData(); batches[b].forEach((f) => fd.append("files", f));
+    if (b === 0) fd.append("text", files.length > 1 ? `Файлы к наряду (${files.length})` : "Файл к наряду");
+    await new Promise((res, rej) => {
+      const x = new XMLHttpRequest(); x.open("POST", `/api/orders/${oid}/files`);
+      x.setRequestHeader("authorization", "Bearer " + S.token);
+      x.upload.onprogress = (e) => { if (btn) btn.textContent = `Файлы: ${Math.min(99, Math.round((done + e.loaded) / total * 100))}%`; };
+      x.onload = () => { if (x.status < 300) return res(); let m = "Ошибка " + x.status; try { const d = JSON.parse(x.responseText); m = d.error || d.detail || m; } catch (e) {} rej(new Error(x.status === 413 ? "файл слишком большой" : m)); };
+      x.onerror = () => rej(new Error("нет связи с сервером"));
+      x.send(fd);
+    });
+    done += batches[b].reduce((s, f) => s + f.size, 0);
+  }
 }
 function fillDoctors() {
   const sel = $("#f_doctor"), F = S.form; if (!sel) return;
@@ -800,11 +1058,31 @@ function addWork(cid) {
   F.items.push({ catalog_id: c.id, name: c.name, teeth, qty: c.unit === "tooth" ? F.sel.size : 1, price: c.price });
   F.sel.clear(); haptic("medium"); paintTeeth(); paintItems();
 }
-function addCustom() {
-  sheet("Другая работа", `<div class="form" style="grid-template-columns:1fr"><label class="field"><span>Название</span><input class="input" id="cw_n"></label>
+function addCustom(toCat) {
+  const mgr = isMgr();
+  sheet(toCat ? "Новая работа в прайс" : "Другая работа", `<div class="form" style="grid-template-columns:1fr"><label class="field"><span>Название</span><input class="input" id="cw_n"></label>
     <label class="field"><span>Количество</span><input class="input" id="cw_q" type="number" value="1" min="1"></label>
-    ${!isLab() || isMgr() ? `<label class="field"><span>Цена за единицу</span><input class="input" id="cw_p" type="number" value="0"></label>` : ""}</div>`,
-  { foot: `<button class="btn primary" onclick="(()=>{const n=$('#cw_n').value.trim();if(!n)return;S.form.items.push({catalog_id:null,name:n,teeth:sortTeeth([...S.form.sel]),qty:+$('#cw_q').value||1,price:+($('#cw_p')?.value||0)});S.form.sel.clear();closeSheet();paintTeeth();paintItems()})()">Добавить</button>` });
+    ${!isLab() || mgr ? `<label class="field"><span>Цена за единицу</span><input class="input" id="cw_p" type="number" value="0"></label>` : ""}
+    ${mgr ? `<label class="field" style="flex-direction:row;align-items:center;justify-content:space-between"><span>Сохранить в прайс (появится кнопкой в нарядах)</span><span class="switch"><input type="checkbox" id="cw_save" ${toCat ? "checked" : ""}><i></i></span></label>
+    <div class="form" id="cw_more" style="grid-template-columns:1fr 1fr;padding:0"><label class="field"><span>Группа</span><select class="input" id="cw_cat">${Object.entries(S.ref.categories).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("")}</select></label>
+      <label class="field"><span>Единица</span><select class="input" id="cw_u">${Object.entries(S.ref.units).map(([k, v]) => `<option value="${k}" ${k === (S.form.sel.size ? "tooth" : "unit") ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label></div>` : ""}</div>`,
+  { foot: `<button class="btn primary" id="cw_go">Добавить</button>` });
+  const sync = () => $("#cw_more") && $("#cw_more").classList.toggle("hidden", !$("#cw_save").checked);
+  if ($("#cw_save")) { $("#cw_save").onchange = sync; sync(); }
+  $("#cw_n").focus();
+  $("#cw_go").onclick = async () => {
+    const n = $("#cw_n").value.trim(); if (!n) return toast("Впишите название");
+    const F = S.form, price = +($("#cw_p")?.value || 0);
+    let cid = null, unit = "unit";
+    if ($("#cw_save")?.checked) {
+      unit = $("#cw_u").value;
+      const c = await act(() => api("/api/catalog", { body: { name: n, category: $("#cw_cat").value, unit, price, stages: ["Изготовление", "Сдача"] } }), "Работа добавлена в прайс");
+      cid = c.id; await refreshRef(); paintWorks();
+    }
+    const qty = unit === "tooth" && F.sel.size ? F.sel.size : (+$("#cw_q").value || 1);
+    F.items.push({ catalog_id: cid, name: n, teeth: sortTeeth([...F.sel]), qty, price });
+    F.sel.clear(); closeSheet(); paintTeeth(); paintItems();
+  };
 }
 function paintItems() {
   const F = S.form, box = $("#itemsBox");
@@ -841,6 +1119,10 @@ async function saveOrder() {
   $("#saveBtn").disabled = true;
   try {
     const o = F.id ? await api("/api/orders/" + F.id, { method: "PATCH", body }) : await api("/api/orders", { body });
+    if (F.files.length) {
+      try { await uploadPending(o.id, F.files, $("#saveBtn")); F.files = []; }
+      catch (e) { toast(`⚠️ Наряд №${o.number} ${F.id ? "сохранён" : "создан"}, но файлы не загрузились (${e.message}) — добавьте их в чат работы`, 7000); location.replace("#/o/" + o.id); refreshDash(); return; }
+    }
     toast(F.id ? "Сохранено" : `Наряд №${o.number} отправлен`); haptic("medium"); refreshDash();
     if (F.id) history.back(); else location.replace("#/o/" + o.id);
   } catch (e) { toast("⚠️ " + e.message, 4000); $("#saveBtn").disabled = false; }
@@ -919,7 +1201,7 @@ async function vClinics() {
     ${c.debt != null ? `<div class="r"><div class="money" style="font-weight:600;color:${c.debt > 0 ? "var(--bad)" : "var(--ok)"}">${money(c.debt)}</div><div class="tiny muted">${c.debt > 0 ? "долг" : "долга нет"}</div></div>` : ""}</div>`).join("")}</div>`
     : `<div class="group"><div class="empty"><b>Клиник пока нет</b>Добавьте клиники, с которыми работает лаборатория</div></div>`;
 }
-function editClinic(c = {}) {
+function editClinic(c = {}, done) {
   sheet(c.id ? "Клиника" : "Новая клиника", `<div class="form">
     <label class="field wide"><span>Название *</span><input class="input" id="c_name" value="${esc(c.name || "")}"></label>
     <label class="field"><span>Телефон</span><input class="input" id="c_phone" value="${esc(c.phone || "")}"></label>
@@ -936,8 +1218,8 @@ function editClinic(c = {}) {
     const b = { name: $("#c_name").value, phone: $("#c_phone").value, whatsapp: $("#c_wa").value, address: $("#c_addr").value, contact: $("#c_contact").value,
       discount_pct: +$("#c_disc").value || 0, notify_to: $("#c_notify").value, note: $("#c_note").value };
     if (c.id) b.active = $("#c_active").checked ? 1 : 0;
-    await api("/api/clinics" + (c.id ? "/" + c.id : ""), { method: c.id ? "PATCH" : "POST", body: b });
-    const r = await api("/api/me"); S.ref = r.ref; closeSheet(); vClinics();
+    const saved = await api("/api/clinics" + (c.id ? "/" + c.id : ""), { method: c.id ? "PATCH" : "POST", body: b });
+    const r = await api("/api/me"); S.ref = r.ref; closeSheet(); done ? done(saved) : vClinics();
   }, "Сохранено");
 }
 async function openClinic(id) {
@@ -1103,7 +1385,7 @@ function urow(u) {
 }
 async function approve(id) { await act(() => api("/api/users/" + id, { method: "PATCH", body: { approved: 1 } }), "Доступ открыт"); vPeople(); }
 async function reject(id) { if (!confirm("Отклонить заявку?")) return; await act(() => api("/api/users/" + id, { method: "PATCH", body: { active: 0 } })); vPeople(); }
-async function editUser(id, preset = {}) {
+async function editUser(id, preset = {}, done) {
   if (!S.users) S.users = await api("/api/users");
   const u = id ? S.users.find((x) => x.id === id) || (await api("/api/users")).find((x) => x.id === id) : { role: "tech", active: 1, ...preset };
   const roles = Object.entries(S.ref.roles).filter(([k]) => k !== "owner" || S.me.role === "owner" || u.role === "owner");
@@ -1127,6 +1409,7 @@ async function editUser(id, preset = {}) {
     const x = await api("/api/users" + (id ? "/" + id : ""), { method: id ? "PATCH" : "POST", body: b });
     closeSheet(); S.users = null; const r = await api("/api/me"); S.ref = r.ref;
     if (location.hash.includes("people")) vPeople();
+    if (done) done(x);
     if (!id) inviteLink(x.id);
   }, "Сохранено");
 }
@@ -1166,7 +1449,7 @@ async function vSettings() {
   waPanel();
 }
 /* Справочник: список строк — переименовать, переставить, удалить, добавить */
-async function editRef(kind) {
+async function editRef(kind, done) {
   const all = await api("/api/refs");
   const list = kind === "parts" ? all.parts.filter((p) => !p.off).map((p) => ({ k: p.k, n: p.n })) : all[kind].map((n) => ({ n }));
   const hint = { implants: "Появляются кнопками в наряде («Система импланта»).", parts: "Компоненты в наряде: сколько штук от клиники и от лаборатории. Удалённые остаются в старых нарядах.",
@@ -1185,7 +1468,7 @@ async function editRef(kind) {
   $("#rfadd").onclick = add; $("#rfnew").onkeydown = (e) => e.key === "Enter" && add();
   $("#rfsave").onclick = () => act(async () => {
     await api("/api/refs/" + kind, { method: "PUT", body: { items: kind === "parts" ? list : list.map((x) => x.n) } });
-    const r = await api("/api/me"); S.ref = r.ref; closeSheet(); vSettings();
+    const r = await api("/api/me"); S.ref = r.ref; closeSheet(); done ? done() : vSettings();
   }, "Справочник сохранён");
 }
 function setTheme(t) { try { localStorage.setItem("dt_theme", t); } catch (e) {} applyTheme(); vSettings(); }

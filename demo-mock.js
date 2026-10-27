@@ -23,6 +23,87 @@
   }
   const DATA = walk(RAW);
   const clone = (x) => JSON.parse(JSON.stringify(x));
+  const realFetch = window.fetch.bind(window);
+
+  /* ---- файлы демо: настоящие сканы лежат рядом (files/), загруженные посетителем — в памяти вкладки ---- */
+  const FILES = {}, ZURL = {}, ZIPS = {};
+  const MIME = { stl: "model/stl", ply: "application/octet-stream", obj: "text/plain", jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png",
+    webp: "image/webp", gif: "image/gif", pdf: "application/pdf", zip: "application/zip", xml: "text/xml", txt: "text/plain", json: "application/json" };
+  const mimeOf = (n) => MIME[(String(n).split(".").pop() || "").toLowerCase()] || "application/octet-stream";
+  window.DEMO_URL = (id) => (FILES[id] ? FILES[id].url : "data:,");
+  window.DEMO_ZURL = (fid, n) => (ZURL[fid] && ZURL[fid][n]) || "data:,";
+  (function seedFiles() {
+    const DF = window.DEMO_FILES; if (!DF) return;
+    const d0 = new Date(), stamp = (hm) => `${fmtD(new Date(d0.getTime() - d0.getTimezoneOffset() * 60000))} ${hm}`;
+    for (const r of Object.values(DATA.roles)) {
+      const o = Object.values(r.order || {}).find((x) => x && x.number === DF.order_number); if (!o) continue;
+      o.files = o.files || []; const ms = (r.messages[o.id] = r.messages[o.id] || []);
+      DF.files.forEach((f, k) => {
+        const people = o.people || [], au = people.find((p) => p.role === f.author_role) || people[0] || { id: null, name: "Врач", role: "doctor" };
+        const rec = { id: f.id, order_id: o.id, name: f.name, path: "", size: f.size, mime: mimeOf(f.name), user_id: au.id, created_at: stamp(f.time), author: au.name };
+        FILES[f.id] = { ...rec, url: f.url };
+        if (!o.files.some((x) => x.id === f.id)) o.files.push(rec);
+        ms.push({ id: 800000 + f.id, order_id: o.id, user_id: au.id, author: au.name, role: au.role, kind: "msg", text: f.text || "", file_id: f.id,
+          source: "web", created_at: rec.created_at, file_name: f.name, file_size: f.size, file_mime: rec.mime });
+      });
+      ms.sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id - b.id));
+    }
+  })();
+  /* ZIP читается прямо в браузере (центральный каталог + DecompressionStream) */
+  async function readZip(fid) {
+    if (ZIPS[fid]) return ZIPS[fid];
+    return (ZIPS[fid] = (async () => {
+      const f = FILES[fid]; if (!f) throw new Error("Файл не найден");
+      const buf = new Uint8Array(await (await realFetch(f.url)).arrayBuffer()), dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+      let e = buf.length - 22; while (e >= 0 && dv.getUint32(e, true) !== 0x06054b50) e--;
+      if (e < 0) throw new Error("Архив повреждён или это не ZIP");
+      const cnt = dv.getUint16(e + 10, true); let p = dv.getUint32(e + 16, true);
+      const entries = []; ZURL[fid] = {};
+      for (let i = 0; i < cnt; i++) {
+        const flag = dv.getUint16(p + 8, true), method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true), size = dv.getUint32(p + 24, true);
+        const nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true), lho = dv.getUint32(p + 42, true);
+        const name = new TextDecoder(flag & 0x800 ? "utf-8" : "ibm866").decode(buf.subarray(p + 46, p + 46 + nl));
+        p += 46 + nl + xl + cl;
+        if (name.endsWith("/") || /__MACOSX\/|\.DS_Store|Thumbs\.db/.test(name) || name.split("/").pop().startsWith("._")) continue;
+        const ent = { i, name, size, packed: csize, enc: !!(flag & 1), date: "" };
+        if (!ent.enc) {
+          const ln = dv.getUint16(lho + 26, true), lx = dv.getUint16(lho + 28, true), st = lho + 30 + ln + lx, raw = buf.subarray(st, st + csize);
+          const bytes = method === 8 ? new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer()) : raw;
+          ZURL[fid][i] = URL.createObjectURL(new Blob([bytes], { type: mimeOf(name) }));
+        }
+        entries.push(ent);
+      }
+      return { name: f.name, size: f.size, entries };
+    })().catch((er) => { delete ZIPS[fid]; throw er; }));
+  }
+  function addFileMsg(r, o, name, size, url, text, kind) {
+    const u = me(r), id = ++nextId, t = now();
+    const rec = { id, order_id: o.id, name, path: "", size, mime: mimeOf(name), user_id: u.id, created_at: t, author: u.name };
+    FILES[id] = { ...rec, url }; o.files = o.files || []; o.files.push(rec);
+    const m = { id: ++nextId, order_id: o.id, user_id: u.id, author: u.name, role: u.role, kind: kind || "msg", text: text || "", file_id: id, source: "web",
+      created_at: t, file_name: name, file_size: size, file_mime: rec.mime };
+    (r.messages[o.id] = r.messages[o.id] || []).push(m);
+    return { rec, m };
+  }
+
+  /* ---- участники чата работы ---- */
+  const LABR = ["owner", "admin", "tech"];
+  function members(r, o) {
+    const roles = r.me.ref.roles || {};
+    return (o.people || []).map((p) => ({ id: p.id, name: p.name, role: p.role, role_name: roles[p.role] || p.role, tg: !!p.tg, phone: p.phone || "", added: !!p.added,
+      side: LABR.includes(p.role) ? "lab" : "clinic",
+      why: p.added ? "Добавлен в чат" : p.role === "owner" ? "Владелец" : p.role === "admin" ? "Администратор" : p.id === o.tech_id ? "Техник наряда"
+        : p.id === o.doctor_id ? "Врач наряда" : p.role === "clinic" ? "Администратор клиники" : "Техник этапа" }));
+  }
+  function candidates(r, o) {
+    const ref = r.me.ref, roles = ref.roles || {}, have = new Set((o.people || []).map((p) => p.id)), lab = LABR.includes(me(r).role);
+    let pool = Array.isArray(r.users) ? r.users.filter((x) => x.active !== 0 && x.approved !== 0 && (LABR.includes(x.role) || x.clinic_id === o.clinic_id))
+      .map((x) => ({ id: x.id, name: x.name, role: x.role, clinic_name: x.clinic_name || (x.clinic_id === o.clinic_id ? o.clinic_name : "") }))
+      : [...(ref.techs || []).map((t) => ({ id: t.id, name: t.name, role: "tech", clinic_name: "" })),
+         ...(ref.doctors || []).filter((d) => d.clinic_id === o.clinic_id).map((d) => ({ id: d.id, name: d.name, role: "doctor", clinic_name: o.clinic_name }))];
+    if (!lab) pool = pool.filter((x) => !LABR.includes(x.role));
+    return pool.filter((x) => !have.has(x.id)).map((x) => ({ ...x, role_name: roles[x.role] || x.role }));
+  }
 
   /* ---- состояние по ролям (в памяти вкладки) ---- */
   const ST = {};
@@ -196,6 +277,8 @@
       if (path === "/api/payments") { if (r.payments.__error) return fx(r.payments); const f = q.get("from") || "", t = q.get("to") || "9999"; return ok(r.payments.filter((p) => (p.paid_at || "").slice(0, 10) >= f && (p.paid_at || "").slice(0, 10) <= t)); }
       const simple = { "/api/users": "users", "/api/catalog": "catalog", "/api/settings": "settings", "/api/audit": "audit", "/api/wa/status": "wa_status", "/api/wa/inbox": "wa_inbox", "/api/salary": "salary" };
       if (simple[path]) return fx(r[simple[path]]);
+      if ((m = path.match(/^\/api\/orders\/(\d+)\/members$/))) { const o = order(r, m[1]); if (!o) return err(404, "Наряд не найден"); return ok({ members: members(r, o), candidates: candidates(r, o) }); }
+      if ((m = path.match(/^\/api\/files\/(\d+)\/zip$/))) { try { return ok(await readZip(+m[1])); } catch (e) { return err(400, e.message); } }
       if (path.startsWith("/api/files/")) return err(404, "Файл не найден");
       return ok([]);
     }
@@ -209,7 +292,30 @@
       (r.messages[m[1]] = r.messages[m[1]] || []).push(msg); return ok(msg);
     }
     if ((m = path.match(/^\/api\/orders\/(\d+)\/read$/))) return ok({ ok: true });
-    if ((m = path.match(/^\/api\/orders\/(\d+)\/files$/))) return err(400, "В демо файлы не загружаются. В рабочей системе — STL, фото, PDF до 100 МБ.");
+    if ((m = path.match(/^\/api\/orders\/(\d+)\/files$/))) {
+      const o = order(r, m[1]); if (!o) return err(404, "Наряд не найден");
+      if (!(body instanceof FormData)) return err(400, "Нет файлов");
+      const fs = body.getAll("files"), text = body.get("text") || "", kind = body.get("kind") || "msg";
+      return ok(fs.map((f, i) => addFileMsg(r, o, f.name, f.size, URL.createObjectURL(f), i ? "" : text, kind).m));
+    }
+    if ((m = path.match(/^\/api\/files\/(\d+)\/zip\/(\d+)\/extract$/))) {
+      const fid = +m[1], n = +m[2], z = await readZip(fid).catch(() => null), e = z && z.entries.find((x) => x.i === n), f = FILES[fid];
+      if (!e || !ZURL[fid][n]) return err(404, "В архиве нет такого файла");
+      const o = order(r, f.order_id); if (!o) return err(404, "Наряд не найден");
+      return ok(addFileMsg(r, o, e.name.split("/").pop(), e.size, ZURL[fid][n], `📦 из архива ${f.name}`).rec);
+    }
+    if ((m = path.match(/^\/api\/orders\/(\d+)\/members(?:\/(\d+))?$/))) {
+      const o = order(r, m[1]); if (!o) return err(404, "Наряд не найден");
+      if (method === "POST") {
+        const c = candidates(r, o).find((x) => x.id === +body.user_id); if (!c) return err(400, "Этого человека нельзя добавить в работу");
+        (o.people = o.people || []).push({ id: c.id, name: c.name, role: c.role, tg: false, added: true });
+        sysMsg(r, o.id, `👤 ${me(r).name} добавил(а) в чат: ${c.name}`);
+      } else if (method === "DELETE") {
+        const p = (o.people || []).find((x) => x.id === +m[2]); if (!p || !p.added) return err(400, "Этого участника нельзя убрать — он в чате по наряду");
+        o.people = o.people.filter((x) => x !== p); sysMsg(r, o.id, `👤 ${me(r).name} убрал(а) из чата: ${p.name}`);
+      }
+      return ok({ members: members(r, o), candidates: candidates(r, o) });
+    }
     if ((m = path.match(/^\/api\/orders\/(\d+)\/status$/))) {
       const o = order(r, m[1]); if (!o) return err(404, "Наряд не найден");
       o.status = body.status; if (body.status === "delivered") o.delivered_at = now();
@@ -267,7 +373,6 @@
     return ok({ ...(body || {}), id: (body && body.id) || ++nextId, ok: true });
   }
 
-  const realFetch = window.fetch.bind(window);
   window.fetch = async function (input, opts = {}) {
     const url = new URL(typeof input === "string" ? input : input.url, location.href);
     const i = url.pathname.indexOf("/api/");
@@ -277,8 +382,24 @@
     TOKEN = (h.get("authorization") || "").replace(/^Bearer\s+/i, "");
     let body = {};
     if (typeof opts.body === "string") { try { body = JSON.parse(opts.body); } catch (e) {} }
+    else if (opts.body instanceof FormData) body = opts.body;
     await new Promise((res) => setTimeout(res, 60));
     try { return await handle(method, path, url.searchParams, body); } catch (e) { console.error(e); return err(500, "Ошибка демо: " + e.message); }
+  };
+
+  /* загрузка файлов в форме наряда идёт через XMLHttpRequest — отвечаем тем же слоем */
+  const RealXHR = window.XMLHttpRequest;
+  window.XMLHttpRequest = function () {
+    let url = "", method = "GET"; const headers = {};
+    const real = new RealXHR(), x = { upload: {}, status: 0, responseText: "", onload: null, onerror: null,
+      open(m, u) { method = m; url = u; if (!/\/api\//.test(u)) real.open(m, u); },
+      setRequestHeader(k, v) { headers[k] = v; if (!/\/api\//.test(url)) real.setRequestHeader(k, v); },
+      send(b) {
+        if (!/\/api\//.test(url)) { real.onload = () => { x.status = real.status; x.responseText = real.responseText; x.onload && x.onload(); }; real.onerror = () => x.onerror && x.onerror(); return real.send(b); }
+        window.fetch(url, { method, headers, body: b }).then(async (res) => { x.status = res.status; x.responseText = await res.text(); x.onload && x.onload(); })
+          .catch(() => x.onerror && x.onerror());
+      } };
+    return x;
   };
 
   /* ---- плашка «демо» ---- */

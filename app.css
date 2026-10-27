@@ -314,3 +314,38 @@ table.t input.input{height:34px;min-width:70px}
 .mk-n{width:22px;height:22px;border-radius:50%;background:var(--surface-3);display:grid;place-items:center;font-size:12px;font-weight:700;flex:none}
 .sheet .pills .pill{background:var(--surface)}
 table.t select.input{min-width:128px}
+
+/* быстрые справочники в наряде */
+.qadd{display:inline-flex;align-items:center;gap:2px;margin-left:6px;padding:2px 8px 2px 6px;border-radius:999px;border:0;background:var(--accent-soft);color:var(--accent);font-size:12px;font-weight:600;cursor:pointer;text-transform:none;letter-spacing:0;vertical-align:middle;line-height:18px}
+.qadd .i{stroke-width:2.6}
+.sec .qadd{margin-left:auto}
+/* файлы: значок типа, архивы, 3D */
+.fbadge{flex:none;min-width:40px;height:32px;padding:0 4px;border-radius:7px;display:inline-grid;place-items:center;font-size:10.5px;font-weight:800;letter-spacing:.02em;background:var(--surface-3);color:var(--label-2)}
+.fbadge.zip{background:rgba(217,122,0,.16);color:#d97a00}.fbadge.m3{background:var(--accent-soft);color:var(--accent)}
+.msg .file .fbadge{margin-right:2px}
+.msg.me .file .fbadge{background:rgba(255,255,255,.9);color:var(--accent)}.msg.me .file .fbadge.zip{color:#b86400}
+.zthumb{width:40px;height:32px;object-fit:cover;border-radius:7px;flex:none;background:var(--surface-3)}
+.ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.txtview{margin:0;max-height:70vh;overflow:auto;background:var(--surface-2);border-radius:10px;padding:12px;font-size:12px;white-space:pre-wrap;word-break:break-word}
+.viewer.tall{height:min(72vh,680px)}
+.viewer canvas{display:block;touch-action:none}
+.v3dp{position:absolute;top:8px;left:8px;display:flex;flex-direction:column;gap:4px;max-width:min(60%,280px);max-height:calc(100% - 40px);overflow:auto;font-size:12px;color:#e8e8e8}
+.v3dp label{display:flex;align-items:center;gap:6px;background:rgba(0,0,0,.45);padding:4px 8px;border-radius:8px;cursor:pointer;backdrop-filter:blur(6px)}
+.v3dp label.err{opacity:.5}.v3dp label span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.v3dp label i{width:10px;height:10px;border-radius:3px;flex:none}
+.v3dp input{margin:0;accent-color:var(--accent)}
+.v3db{display:flex;gap:4px}.v3db button{border:0;border-radius:8px;padding:5px 10px;background:rgba(0,0,0,.45);color:#eee;font-size:12px;cursor:pointer}
+.v3db button.on{background:var(--accent);color:var(--accent-ink)}
+/* формула + 3D рядом */
+.fml3{display:grid;grid-template-columns:1fr;gap:12px}
+.fml3 .viewer{order:-1}
+.fml3 .fml3f{max-width:520px;margin:0 auto;width:100%}
+@media (min-width:1700px){.fml3{grid-template-columns:minmax(260px,.8fr) 1.4fr;align-items:start}.fml3 .viewer{order:0}}
+/* карточка чата */
+.chat .ch.link{cursor:pointer}.chat .ch.link:hover{background:var(--surface-2)}
+.chppl{display:flex;gap:2px;flex:none}
+@media (max-width:420px){.chppl{display:none}}
+.av.lg{width:48px;height:48px;font-size:17px}
+.cihead{display:flex;gap:12px;align-items:center}.cihead .t{font-weight:700;font-size:17px}.cihead .s{color:var(--label-2);font-size:13px}
+.mgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:4px}
+.mgrid img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;cursor:pointer;background:var(--surface-3)}

@@ -194,6 +194,7 @@
       Object.assign(s, { state: "lab", done_at: null, result: "" }); msg = `↩️ ${s.name}: этап возвращён в работу`;
       status = ["ready", "delivered"].includes(o.status) ? "work" : null;
     } else if (action === "edit") {
+      if ("plan_at" in body && (s.plan_at || "") !== (body.plan_at || "")) { const p = body.plan_at || ""; msg = p ? `📅 ${s.name}: изготовить к ${p.slice(8, 10)}.${p.slice(5, 7)}.${p.slice(0, 4)}` : `📅 ${s.name}: дата этапа убрана`; body.plan_at = p || null; }
       for (const k of ["tech_id", "plan_at", "note", "name", "received_at", "sent_at"]) if (k in body) s[k] = body[k];
       if (body.tech_id) s.tech_name = (r.me.ref.techs.find((x) => x.id === +body.tech_id) || {}).name || s.tech_name;
     } else return err(400, "Неизвестное действие");
@@ -267,7 +268,7 @@
       if (path === "/api/me") return ok({ ...r.me, dash: dash(r) });
       if (path === "/api/dashboard") return ok(dash(r));
       if (path === "/api/orders") return ok(listOrders(r, q));
-      if ((m = path.match(/^\/api\/orders\/(\d+)$/))) { const o = order(r, m[1]); if (!o) return err(404, "Наряд не найден"); const li = r.orders.find((x) => x.id === +m[1]); if (li) li.unread = 0; return ok(o); }
+      if ((m = path.match(/^\/api\/orders\/(\d+)$/))) { const o = order(r, m[1]); if (!o) return err(404, r.orders.some((x) => x.id === +m[1]) ? "В демо подробности старых сданных нарядов не сохранены" : "Наряд не найден"); const li = r.orders.find((x) => x.id === +m[1]); if (li) li.unread = 0; return ok(o); }
       if ((m = path.match(/^\/api\/orders\/(\d+)\/messages$/))) { const a = +(q.get("after") || 0); return ok((r.messages[m[1]] || []).filter((x) => x.id > a)); }
       if (path === "/api/refs") { const f = r.me.ref; return ok({ implants: f.implants, shades: f.shades, stages: f.stage_lib,
         parts: Object.entries(f.parts_all || {}).map(([k, n]) => ({ k, n, ...(f.parts.some(([pk]) => pk === k) ? {} : { off: 1 }) })) }); }
@@ -275,6 +276,7 @@
       if ((m = path.match(/^\/api\/clinics\/(\d+)$/))) return fx(r.clinic[m[1]] || { __error: 404, detail: "Клиника не найдена" });
       if (path === "/api/statement") return fx(r.statement[q.get("clinic_id") || "_"] || r.statement._);
       if (path === "/api/payments") { if (r.payments.__error) return fx(r.payments); const f = q.get("from") || "", t = q.get("to") || "9999"; return ok(r.payments.filter((p) => (p.paid_at || "").slice(0, 10) >= f && (p.paid_at || "").slice(0, 10) <= t)); }
+      if ((m = path.match(/^\/api\/reports\/(\w+)$/))) { const k = r.reports && r.reports[m[1]]; if (!k) return err(403, "Только для владельца и администратора"); return ok(k[q.get("p")] || k.month); }
       const simple = { "/api/users": "users", "/api/catalog": "catalog", "/api/settings": "settings", "/api/audit": "audit", "/api/wa/status": "wa_status", "/api/wa/inbox": "wa_inbox", "/api/salary": "salary" };
       if (simple[path]) return fx(r[simple[path]]);
       if ((m = path.match(/^\/api\/orders\/(\d+)\/members$/))) { const o = order(r, m[1]); if (!o) return err(404, "Наряд не найден"); return ok({ members: members(r, o), candidates: candidates(r, o) }); }

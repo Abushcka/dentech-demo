@@ -63,6 +63,7 @@ const I = {
   board: '<rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="11" rx="1.5"/><rect x="17" y="4" width="4" height="7" rx="1.5"/>',
   tooth: '<path d="M7 3c-2.5 0-4 2-4 4.5 0 3 1.5 4 2 7.5.5 3.5 1 6 2.5 6s1.5-4 2.5-6c.5-1 1.5-1 2 0 1 2 1 6 2.5 6s2-2.5 2.5-6c.5-3.5 2-4.5 2-7.5C21 5 19.5 3 17 3c-2 0-3 1-5 1S9 3 7 3z"/>',
   file: '<path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5"/>',
+  chart: '<path d="M4 20V4M4 20h16"/><path d="M8 16v-4M12 16V8M16 16v-6M20 16v-9"/>',
   check: '<path d="M5 12.5 10 17 19 7"/>', dl: '<path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/>', chev: '<path d="m9 6 6 6-6 6"/>', watch: '<rect x="6" y="6" width="12" height="12" rx="3"/><path d="M9 6l1-3h4l1 3M9 18l1 3h4l1-3M12 9.5V12l1.5 1.5"/>',
 };
 const ic = (n, s = 20) => `<svg class="i" viewBox="0 0 24 24" style="width:${s}px;height:${s}px">${I[n] || ""}</svg>`;
@@ -231,7 +232,7 @@ async function refreshDash() {
 function navItems() {
   const r = S.me.role, n = [["home", "Сводка", "home"], ["orders", isClient() ? "Мои работы" : "Работы", "list"]];
   if (isClient()) n.push(["new", "Новый наряд", "plus"], ["money", "Счета", "money"]);
-  if (isMgr()) n.push(["new", "Новый наряд", "plus"], ["clinics", "Клиники", "clinic"], ["money", "Финансы", "money"], ["catalog", "Прайс", "tag"], ["people", "Люди", "people"]);
+  if (isMgr()) n.push(["new", "Новый наряд", "plus"], ["clinics", "Клиники", "clinic"], ["money", "Финансы", "money"], ["reports", "Отчёты", "chart"], ["catalog", "Прайс", "tag"], ["people", "Люди", "people"]);
   if (r === "tech") n.push(["new", "Новый наряд", "plus"], ["money", "Моя оплата", "money"]);
   n.push(["ai", "ИИ-помощник", "ai"], ["settings", "Настройки", "gear"]);
   return n;
@@ -287,7 +288,7 @@ function route() {
   const page = $("#page"); page.innerHTML = '<div class="spin"></div>';
   window.scrollTo(0, 0);
   const views = { home: vHome, orders: vOrders, o: vOrder, new: vNew, edit: vNew, clinics: vClinics, money: vMoney, catalog: vCatalog,
-    people: vPeople, settings: vSettings, ai: vAI };
+    people: vPeople, settings: vSettings, ai: vAI, reports: vReports };
   (views[name] || vHome)(arg).catch((e) => { page.innerHTML = `<div class="empty"><b>Не получилось</b>${esc(e.message)}</div>`; });
 }
 
@@ -342,7 +343,7 @@ function orow(o) {
   const works = (o.items || []).map((i) => i.name + (i.teeth ? ` (${i.teeth})` : "")).join(", ");
   return `<div class="row link" onclick="go('o/${o.id}')"><div class="no">${o.number}</div>
     <div class="grow"><div class="t" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${o.urgent ? '<span class="chip st-correction">срочно</span>' : ""}${esc(o.patient || "без пациента")} ${stChip(o.status)}</div>
-    <div class="s">${esc(works)}</div><div class="s">${esc(o.clinic_name || "")}${o.doctor_name ? " · " + esc(o.doctor_name) : ""}${o.stage ? " · этап: " + esc(o.stage.name) : ""}</div></div>
+    <div class="s">${esc(works)}</div><div class="s">${esc(o.clinic_name || "")}${o.doctor_name ? " · " + esc(o.doctor_name) : ""}${o.stage ? " · этап: " + esc(o.stage.name) + (o.stage.plan_at ? ` <span class="${o.stage.plan_at < today() ? "late-t" : ""}">до ${fdate(o.stage.plan_at)}</span>` : "") : ""}</div></div>
     <div class="r small">${dueHtml(o)}${o.unread ? `<div style="margin-top:4px"><span class="badge">${o.unread}</span></div>` : ""}${o.tech_name ? `<div style="margin-top:4px">${av(o.tech_id, o.tech_name, "sm")}</div>` : ""}</div></div>`;
 }
 
@@ -545,9 +546,32 @@ function stagesHtml(o) {
     return `<div class="stage ${s.state}"><div class="mk">${s.state === "done" ? ic("check", 15) : i + 1}</div><div>
       <div class="nm">${esc(s.name)} ${stTxt}${s.result === "fix" && s.state !== "done" ? '<span class="chip st-correction">коррекция</span>' : ""}${s === cur ? '<span class="chip plain">текущий</span>' : ""}</div>
       <div class="dt">${dates || (s.state === "wait" ? "ожидает" : "")}${s.tech_name ? " · " + esc(s.tech_name) : ""}</div>
+      ${planHtml(o, s)}
       ${s.note ? `<div class="snote">${esc(s.note)}</div>` : ""}
       ${a.length ? `<div class="acts">${a.join("")}</div>` : ""}</div></div>`;
   }).join("")}</div>`;
+}
+/* дата изготовления этапа: техник/админ ставит, клиника видит */
+function planLate(s) {
+  if (!s.plan_at) return 0;
+  const end = s.state === "done" || s.state === "clinic" ? (s.sent_at || s.done_at || "").slice(0, 10) : today();
+  if (!end) return 0;
+  return Math.round((new Date(end + "T12:00") - new Date(s.plan_at + "T12:00")) / 864e5);
+}
+function planHtml(o, s) {
+  const late = planLate(s), open = s.state === "wait" || s.state === "lab";
+  const badge = s.plan_at && late > 0 ? `<span class="chip st-correction">${open ? "просрочен" : "позже"} на ${late} дн.</span>`
+    : s.plan_at && !open && late <= 0 ? '<span class="chip st-ready">в срок</span>' : "";
+  if (isLab() && open && o.status !== "cancelled" && o.status !== "delivered")
+    return `<div class="plan ${late > 0 ? "late" : ""}"><span>Изготовить к</span><input class="input" type="date" value="${s.plan_at || ""}" min="${(o.received_at || "").slice(0, 10)}"
+      onchange="setPlan(${s.id}, this.value)" aria-label="Дата изготовления этапа ${esc(s.name)}">${badge}</div>`;
+  if (!s.plan_at) return "";
+  return `<div class="plan ro ${late > 0 && open ? "late" : ""}"><span>${open ? (isClient() ? "Будет готово" : "Изготовить к") : "План"}: <b>${fdate(s.plan_at)}</b></span>${badge}</div>`;
+}
+async function setPlan(sid, v) {
+  if (S.cur && S.cur.due_at && v && v > S.cur.due_at.slice(0, 10) && !confirm("Дата этапа позже срока сдачи наряда. Сохранить?")) return reloadOrder();
+  await act(() => api(`/api/stages/${sid}/edit`, { body: { plan_at: v || "" } }), v ? "Дата этапа сохранена" : "Дата убрана");
+  await reloadOrder(); pollChat();
 }
 function filesHtml(o) {
   if (!o.files.length) return '<div class="muted small">Файлов пока нет</div>';
@@ -1318,6 +1342,269 @@ async function loadSalary() {
     <div class="tablewrap"><table class="t"><tr><th>Сдан</th><th>№</th><th>Пациент</th><th>Работы</th><th>Клиника</th><th class="r">Оплата</th></tr>
     ${t.orders.map((o) => `<tr><td>${fdate(o.delivered_at)}</td><td><a href="#/o/${o.order_id}">${o.number}</a></td><td>${esc(o.patient)}</td><td>${esc(o.works)}</td><td>${esc(o.clinic_name || "")}</td><td class="r">${money(o.pay)}</td></tr>`).join("")}</table></div>`).join("")
     : `<div class="group"><div class="empty"><b>Нет сданных работ за период</b>Оплата считается по сданным работам и ставкам из прайса</div></div>`;
+}
+
+/* ---------- отчёты руководителя ---------- */
+const RP_TABS = [["overview", "Обзор"], ["clinics", "Клиники"], ["doctors", "Врачи"], ["works", "Виды работ"], ["techs", "Техники"],
+  ["quality", "Сроки и качество"], ["money", "Деньги"], ["load", "Загрузка"]];
+const RP_PRESETS = [["week", "7 дней"], ["month", "Этот месяц"], ["prev", "Прошлый месяц"], ["quarter", "Квартал"], ["half", "Полгода"], ["year", "Этот год"]];
+function rpRange(p) {
+  const d = new Date(), iso = (x) => x.getFullYear() + "-" + String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getDate()).padStart(2, "0");
+  const t = iso(d), y = d.getFullYear(), m = d.getMonth();
+  if (p === "week") return [addDays(-6), t];
+  if (p === "prev") return [iso(new Date(y, m - 1, 1)), iso(new Date(y, m, 0))];
+  if (p === "quarter") return [iso(new Date(y, Math.floor(m / 3) * 3, 1)), t];
+  if (p === "half") return [iso(new Date(y, m - 5, 1)), t];
+  if (p === "year") return [y + "-01-01", t];
+  return [t.slice(0, 8) + "01", t];
+}
+const RP = { tab: "overview", preset: "month", from: "", to: "", clinic: "", tech: "", data: null, sort: {}, tables: {} };
+try { Object.assign(RP, JSON.parse(localStorage.getItem("dt_rp") || "{}"), { data: null, tables: {} }); } catch (e) {}
+function rpSave() { try { localStorage.setItem("dt_rp", JSON.stringify({ tab: RP.tab, preset: RP.preset, from: RP.from, to: RP.to })); } catch (e) {} }
+
+/* форматы */
+const pct = (v) => v == null ? "—" : String(v).replace(".", ",") + "%";
+const dd = (v) => v == null ? "—" : String(v).replace(".", ",") + " дн.";
+const nn = (v) => v == null ? "—" : Math.round(v).toLocaleString("ru-RU").replace(/,/g, " ");
+const short = (n) => { const a = Math.abs(n); return a >= 1e6 ? (n / 1e6).toFixed(a >= 1e7 ? 0 : 1).replace(".", ",") + " млн" : a >= 1e3 ? Math.round(n / 1e3) + " тыс" : String(Math.round(n)); };
+function chg(v, inverse) {
+  if (v == null) return "";
+  const good = inverse ? v < 0 : v > 0, bad = inverse ? v > 0 : v < 0;
+  return `<span class="chg ${good ? "up" : bad ? "down" : ""}">${v > 0 ? "▲" : v < 0 ? "▼" : "•"} ${String(Math.abs(v)).replace(".", ",")}%</span>`;
+}
+const FMT = { money: (v) => money(v), n: nn, pct, days: dd, date: (v) => v ? fdate(String(v).slice(0, 10)) : "—", text: (v) => esc(v ?? "—"), chg: (v) => chg(v) || "—" };
+
+async function vReports() {
+  setTop("Отчёты", { actions: `<button class="btn sm no-print" onclick="rpCsv()" title="Скачать таблицы отчёта для Excel">${ic("dl", 16)}<span class="hide-sm">Excel (CSV)</span></button><button class="btn sm no-print" onclick="window.print()">${ic("print", 16)}<span class="hide-sm">Печать</span></button>` });
+  if (!RP.from || RP.preset !== "custom") [RP.from, RP.to] = rpRange(RP.preset);
+  $("#page").innerHTML = `<div class="rp-bar no-print">
+      <div class="seg rp-tabs" role="tablist">${RP_TABS.map(([k, l]) => `<button role="tab" class="${k === RP.tab ? "on" : ""}" onclick="rpTab('${k}')">${l}</button>`).join("")}</div>
+      <div class="toolbar" style="margin:10px 0 0">
+        <div class="pills">${RP_PRESETS.map(([k, l]) => `<button class="pill ${k === RP.preset ? "on" : ""}" onclick="rpPreset('${k}')">${l}</button>`).join("")}</div>
+        <span class="rp-dates"><input class="input" type="date" id="rpf" value="${RP.from}" onchange="rpCustom()"> — <input class="input" type="date" id="rpt" value="${RP.to}" onchange="rpCustom()"></span></div>
+      <div class="toolbar" style="margin:0">
+        <select class="input rp-sel" id="rpc" onchange="RP.clinic=this.value;rpLoad()"><option value="">Все клиники</option>${S.ref.clinics.map((c) => `<option value="${c.id}" ${String(c.id) === RP.clinic ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>
+        <select class="input rp-sel" id="rpk" onchange="RP.tech=this.value;rpLoad()"><option value="">Все техники</option>${(S.ref.techs || []).map((c) => `<option value="${c.id}" ${String(c.id) === RP.tech ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>
+      </div></div>
+    <div class="print-only"><h2 style="margin:0">${esc(S.ref.lab)} · ${esc(RP_TABS.find((x) => x[0] === RP.tab)[1])}</h2></div>
+    <div class="small muted" id="rpnote" style="margin:10px 4px"></div><div id="rpbox"><div class="spin"></div></div>`;
+  rpLoad();
+}
+function rpTab(k) { RP.tab = k; rpSave(); vReports(); }
+function rpPreset(k) { RP.preset = k; [RP.from, RP.to] = rpRange(k); rpSave(); vReports(); }
+function rpCustom() { RP.preset = "custom"; RP.from = $("#rpf").value; RP.to = $("#rpt").value; if (RP.from > RP.to) [RP.from, RP.to] = [RP.to, RP.from]; rpSave(); vReports(); }
+function rpFilter(k, v) { RP[k] = String(v ?? ""); RP.tab = "overview"; rpSave(); vReports(); }
+async function rpLoad() {
+  const q = `from=${RP.from}&to=${RP.to}&p=${RP.preset}` + (RP.clinic ? "&clinic_id=" + RP.clinic : "") + (RP.tech ? "&tech_id=" + RP.tech : "");
+  const box = $("#rpbox"); if (!box) return;
+  box.innerHTML = '<div class="spin"></div>';
+  const d = await api(`/api/reports/${RP.tab}?${q}`); RP.data = d; RP.tables = {};
+  if (RP.lastQ !== RP.tab + q) Object.keys(RP).filter((k) => k.startsWith("all_")).forEach((k) => delete RP[k]); RP.lastQ = RP.tab + q;
+  const cl = RP.clinic && S.ref.clinics.find((c) => String(c.id) === RP.clinic), te = RP.tech && (S.ref.techs || []).find((c) => String(c.id) === RP.tech);
+  $("#rpnote").innerHTML = `Период: <b>${fdate(RP.from)} — ${fdate(RP.to)}</b>` + (d.prev ? ` · сравнение с ${fdate(d.prev.from)} — ${fdate(addDaysFrom(d.prev.to, -1))}` : "") +
+    (cl ? ` · <span class="chip">${esc(cl.name)} <a href="javascript:rpFilter('clinic','')" title="Снять">✕</a></span>` : "") + (te ? ` · <span class="chip">${esc(te.name)} <a href="javascript:rpFilter('tech','')" title="Снять">✕</a></span>` : "");
+  ({ overview: rpOverview, clinics: rpClinics, doctors: rpDoctors, works: rpWorks, techs: rpTechs, quality: rpQuality, money: rpMoney, load: rpLoadTab })[RP.tab](d, box);
+}
+function addDaysFrom(s, n) { const d = new Date(s + "T12:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
+
+/* плитка показателя */
+function tile(label, value, { sub = "", delta = "", alert = false, hint = "" } = {}) {
+  return `<div class="kpi rp-k ${alert ? "alert" : ""}" ${hint ? `title="${esc(hint)}"` : ""}><div class="l">${label}</div><div class="v">${value}</div><div class="s">${delta}${sub ? `<span>${sub}</span>` : ""}</div></div>`;
+}
+
+/* таблица с сортировкой; данные запоминаются для выгрузки в CSV */
+function rtable(id, title, cols, rows, { onRow, foot, empty = "Нет данных за период", limit = 0 } = {}) {
+  RP.tables[id] = { title, cols, rows };
+  const s = RP.sort[id];
+  let data = s ? [...rows].sort((a, b) => { const x = a[s.k] ?? -Infinity, y = b[s.k] ?? -Infinity; return (x > y ? 1 : x < y ? -1 : 0) * s.dir; }) : rows;
+  const more = limit && !RP["all_" + id] && data.length > limit ? data.length - limit : 0;
+  if (more) data = data.slice(0, limit);
+  if (!rows.length) return `<div class="group"><div class="empty">${empty}</div></div>`;
+  return `<div class="tablewrap" id="tw_${id}"><table class="t rp-t"><tr>${cols.map((c) => `<th class="${c.r !== false && c.f !== "text" && c.f !== "date" ? "r" : ""} sortable" onclick="rpSort('${id}','${c.k}')">${c.l}${s && s.k === c.k ? (s.dir > 0 ? " ↑" : " ↓") : ""}</th>`).join("")}</tr>
+    ${data.map((r, i) => `<tr ${onRow ? `class="link" onclick="${onRow(r)}"` : ""}>${cols.map((c) => `<td class="${c.r !== false && c.f !== "text" && c.f !== "date" ? "r" : ""}">${c.html ? c.html(r) : FMT[c.f || "n"](r[c.k])}</td>`).join("")}</tr>`).join("")}
+    ${foot ? `<tr class="foot">${foot}</tr>` : ""}</table></div>${more ? `<p class="small no-print"><a href="javascript:RP['all_${id}']=1;rpLoad()">Показать ещё ${more} →</a> <span class="muted">· в Excel выгружаются все</span></p>` : ""}`;
+}
+function rpSort(id, k) { const s = RP.sort[id]; RP.sort[id] = s && s.k === k ? { k, dir: -s.dir } : { k, dir: -1 }; rpLoad(); }
+function rpCsv() {
+  const ts = Object.values(RP.tables);
+  if (!ts.length) return toast("В этом отчёте нет таблиц");
+  const cell = (v) => { v = v == null ? "" : typeof v === "number" ? String(v).replace(".", ",") : String(v); return /[";\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const lines = [`${S.ref.lab};${RP_TABS.find((x) => x[0] === RP.tab)[1]};${RP.from} — ${RP.to}`, ""];
+  ts.forEach((t) => { lines.push(t.title, t.cols.map((c) => cell(c.l)).join(";")); t.rows.forEach((r) => lines.push(t.cols.map((c) => cell(c.csv ? c.csv(r) : r[c.k])).join(";"))); lines.push(""); });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }));
+  a.download = `dentech-${RP.tab}-${RP.from}-${RP.to}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+/* столбчатая диаграмма: одна или две серии, общая ось, подсказка при наведении */
+function colChart(id, rows, series, fmt = money) {
+  const max = Math.max(1, ...rows.flatMap((r) => series.map((s) => r[s.k] || 0)));
+  const step = niceStep(max), top = Math.ceil(max / step) * step, ticks = [];
+  for (let v = 0; v <= top; v += step) ticks.push(v);
+  const every = Math.ceil(rows.length / (window.innerWidth < 900 ? 5 : 10));
+  RP["ch_" + id] = { rows, series, fmt };
+  return `<div class="rp-chart" id="ch_${id}">
+    ${series.length > 1 ? `<div class="legend">${series.map((s) => `<span><i style="background:var(${s.c})"></i>${s.l}</span>`).join("")}</div>` : ""}
+    <div class="plot"><div class="yax">${ticks.slice().reverse().map((t) => `<span>${fmt === money ? short(t) : nn(t)}</span>`).join("")}</div>
+    <div class="area"><div class="cg">${ticks.map((t) => `<div class="gl" style="bottom:${(t / top) * 100}%"></div>`).join("")}</div>
+      <div class="cols">${rows.map((r, i) => `<div class="cc" onmouseenter="chTip(event,'${id}',${i})" onmouseleave="chTip()" onclick="chTip(event,'${id}',${i})">
+        <div class="bars"><div>${series.map((s) => `<b style="height:${((r[s.k] || 0) / top) * 100}%;background:var(${s.c})"></b>`).join("")}</div></div>
+        <div class="xl">${i % every === 0 ? `<span>${esc(r.label)}</span>` : ""}</div></div>`).join("")}</div></div></div></div>`;
+}
+function niceStep(max) { const raw = max / 4, p = Math.pow(10, Math.floor(Math.log10(raw))), m = raw / p; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * p; }
+function chTip(e, id, i) {
+  let t = $("#chtip");
+  if (!e) { if (t) t.remove(); return; }
+  const c = RP["ch_" + id], r = c.rows[i];
+  if (!t) { t = document.createElement("div"); t.id = "chtip"; t.className = "chtip"; document.body.appendChild(t); }
+  t.innerHTML = `<b>${esc(r.tip || r.label)}</b>${c.series.map((s) => `<div><i style="background:var(${s.c})"></i>${s.l}<span>${c.fmt(r[s.k] || 0)}</span></div>`).join("")}`;
+  const rc = e.currentTarget.getBoundingClientRect();
+  t.style.left = Math.min(window.innerWidth - t.offsetWidth - 8, Math.max(8, rc.left + rc.width / 2 - t.offsetWidth / 2)) + "px";
+  t.style.top = Math.max(8, rc.top + window.scrollY - t.offsetHeight - 6) + "px";
+}
+/* горизонтальные полосы: доля/сравнение по категориям */
+function hbars(rows, { k = "revenue", label = "name", fmt = money, sub, onRow } = {}) {
+  const max = Math.max(1, ...rows.map((r) => r[k] || 0));
+  return `<div class="group">${rows.map((r) => `<div class="row ${onRow ? "link" : ""}" ${onRow ? `onclick="${onRow(r)}"` : ""}><div class="grow" style="min-width:0">
+    <div class="hb-top"><span class="t">${esc(r[label])}</span><span class="num"><b>${fmt(r[k] || 0)}</b>${sub ? ` <span class="muted small">${sub(r)}</span>` : ""}</span></div>
+    <div class="bar" style="margin-top:6px"><i style="width:${((r[k] || 0) / max) * 100}%;background:var(--c1)"></i></div></div></div>`).join("") || '<div class="row muted">Нет данных</div>'}</div>`;
+}
+
+/* ----- вкладки ----- */
+function rpOverview(d, box) {
+  const k = d.kpi, b = { day: "по дням", week: "по неделям", month: "по месяцам" }[d.bucket];
+  const tip = (r) => d.bucket === "week" ? "Неделя с " + r.label : r.label;
+  d.series.forEach((r) => r.tip = tip(r));
+  box.innerHTML = `<div class="kpis rp-kpis">
+      ${tile("Выручка", money(k.revenue), { delta: chg(k.revenue_chg), sub: "сданные работы", hint: "Сумма сданных нарядов по дате сдачи" })}
+      ${tile("Получено оплат", money(k.paid), { delta: chg(k.paid_chg), sub: k.collect_pct != null ? "собрано " + pct(k.collect_pct) + " выручки" : "" })}
+      ${tile("Сдано работ", nn(k.delivered), { delta: chg(k.delivered_chg), sub: nn(k.units) + " ед." })}
+      ${tile("Принято нарядов", nn(k.received), { delta: chg(k.received_chg), sub: k.cancelled ? k.cancelled + " отменено" : "" })}
+      ${tile("Средний чек", money(k.avg_check), { delta: chg(k.avg_check_chg), sub: k.clients + " клиник" })}
+      ${tile("После сдельной оплаты", money(k.margin), { sub: "маржа " + pct(k.margin_pct) + " · техникам " + short(k.tech_pay), hint: "Выручка минус сдельная оплата техников (без аренды, материалов и прочих расходов)" })}
+      ${tile("Сдано в срок", pct(k.on_time_pct), { sub: k.on_time_prev != null ? "было " + pct(k.on_time_prev) : "", alert: k.on_time_pct != null && k.on_time_pct < 70 })}
+      ${tile("Срок изготовления", dd(k.cycle_days), { sub: k.cycle_prev != null ? "было " + dd(k.cycle_prev) : "от приёма до сдачи" })}
+      ${tile("Долг клиник", money(k.debt), { sub: "на сегодня", alert: k.debt > 0 })}
+      ${tile("В работе сейчас", nn(k.wip), { sub: "на " + money(k.wip_value) })}
+      ${tile("Просрочено сейчас", nn(k.overdue), { alert: k.overdue > 0, sub: "активные работы" })}
+      ${tile("Коррекций", nn(k.fixes), { sub: "за период", alert: k.fixes > 0 && k.delivered && k.fixes / k.delivered > .15 })}
+    </div>
+    <div class="rp-grid">
+      <div class="card"><div class="ch-h"><b>Выручка и оплаты</b><span class="muted small">${b}</span></div>${colChart("rev", d.series, [{ k: "revenue", l: "Выручка", c: "--c1" }, { k: "paid", l: "Оплаты", c: "--c2" }])}</div>
+      <div class="card"><div class="ch-h"><b>Принято и сдано нарядов</b><span class="muted small">${b}</span></div>${colChart("cnt", d.series, [{ k: "received", l: "Принято", c: "--c1" }, { k: "delivered", l: "Сдано", c: "--c2" }], nn)}</div>
+    </div>
+    <div class="rp-grid three">
+      <div><div class="sec">Клиники — кто приносит выручку</div>${hbars(d.top_clinics, { sub: (r) => pct(r.share), onRow: (r) => `rpFilter('clinic',${r.id})` })}<p class="small"><a href="javascript:rpTab('clinics')">Все клиники →</a></p></div>
+      <div><div class="sec">Виды работ</div>${hbars(d.top_works, { sub: (r) => nn(r.units) + " ед." })}<p class="small"><a href="javascript:rpTab('works')">Все виды работ →</a></p></div>
+      <div><div class="sec">Сейчас в работе по статусам</div>${hbars(d.wip, { k: "n", fmt: nn, sub: (r) => money(r.value), onRow: (r) => `filterGo({status:'${r.status}'})` })}</div>
+    </div>`;
+  RP.tables.series = { title: "Динамика " + b, cols: [{ k: "label", l: "Период" }, { k: "revenue", l: "Выручка" }, { k: "paid", l: "Оплаты" }, { k: "received", l: "Принято" }, { k: "delivered", l: "Сдано" }], rows: d.series };
+  RP.tables.kpi = { title: "Показатели", cols: [{ k: "k", l: "Показатель" }, { k: "v", l: "Значение" }], rows: [
+    ["Выручка", k.revenue], ["Выручка прошлого периода", k.revenue_prev], ["Получено оплат", k.paid], ["Сдано работ", k.delivered], ["Единиц", k.units],
+    ["Принято нарядов", k.received], ["Средний чек", k.avg_check], ["Сдельная оплата техникам", k.tech_pay], ["После сдельной оплаты", k.margin],
+    ["Сдано в срок, %", k.on_time_pct], ["Срок изготовления, дн.", k.cycle_days], ["Долг клиник", k.debt], ["В работе", k.wip], ["Просрочено", k.overdue], ["Коррекций", k.fixes]].map(([a, v]) => ({ k: a, v })) };
+}
+function rpClinics(d, box) {
+  box.innerHTML = `<p class="small muted" style="margin-top:0">Нажмите на клинику — откроется обзор только по ней.</p>` + rtable("clinics", "Клиники", [
+    { k: "name", l: "Клиника", f: "text" }, { k: "received", l: "Принято" }, { k: "delivered", l: "Сдано" }, { k: "units", l: "Ед." },
+    { k: "revenue", l: "Выручка", f: "money" }, { k: "share", l: "Доля", f: "pct" }, { k: "revenue_chg", l: "К прошлому", f: "chg" },
+    { k: "avg_check", l: "Ср. чек", f: "money" }, { k: "paid", l: "Оплачено", f: "money" },
+    { k: "debt", l: "Долг сейчас", html: (r) => `<b style="color:${r.debt > 0 ? "var(--bad)" : "inherit"}">${money(r.debt)}</b>` },
+    { k: "on_time_pct", l: "В срок", f: "pct" }, { k: "fixes", l: "Коррекций" }, { k: "discount_pct", l: "Скидка", f: "pct" },
+    { k: "last_order", l: "Посл. наряд", f: "date" }], d.rows, { onRow: (r) => `rpFilter('clinic',${r.id})`,
+    foot: `<td><b>Итого</b></td><td class="r">${nn(rsum(d.rows, "received"))}</td><td class="r">${nn(rsum(d.rows, "delivered"))}</td><td class="r">${nn(rsum(d.rows, "units"))}</td><td class="r"><b>${money(d.total)}</b></td><td></td><td></td><td></td><td class="r">${money(rsum(d.rows, "paid"))}</td><td class="r"><b>${money(rsum(d.rows, "debt"))}</b></td><td colspan="4"></td>` });
+  const sleeping = d.rows.filter((r) => r.last_order && r.last_order.slice(0, 10) < addDays(-30) && r.active);
+  if (sleeping.length) box.innerHTML += `<div class="sec">Не присылали работы больше 30 дней</div><div class="group">${sleeping.map((r) => `<div class="row"><div class="grow t">${esc(r.name)}</div><div class="r small muted">последний наряд ${fdate(r.last_order.slice(0, 10))}</div></div>`).join("")}</div>`;
+}
+const rsum = (rows, k) => rows.reduce((s, r) => s + (r[k] || 0), 0);
+function rpDoctors(d, box) {
+  box.innerHTML = rtable("doctors", "Врачи", [
+    { k: "name", l: "Врач", f: "text" }, { k: "clinic_name", l: "Клиника", f: "text" }, { k: "received", l: "Принято" }, { k: "delivered", l: "Сдано" },
+    { k: "units", l: "Ед." }, { k: "revenue", l: "Выручка", f: "money" }, { k: "share", l: "Доля", f: "pct" }, { k: "avg_check", l: "Ср. чек", f: "money" },
+    { k: "fittings_avg", l: "Примерок на работу", f: "n", html: (r) => r.fittings_avg == null ? "—" : String(r.fittings_avg).replace(".", ",") },
+    { k: "fixes", l: "Коррекций" }, { k: "fix_rate", l: "Работ с коррекцией", f: "pct" }, { k: "on_time_pct", l: "В срок", f: "pct" },
+    { k: "last_order", l: "Посл. наряд", f: "date" }], d.rows);
+}
+function rpWorks(d, box) {
+  box.innerHTML = `<div class="sec">По группам</div>` + rtable("cats", "Группы работ", [
+    { k: "name", l: "Группа", f: "text" }, { k: "units", l: "Единиц" }, { k: "revenue", l: "Выручка", f: "money" }, { k: "share", l: "Доля", f: "pct" },
+    { k: "tech_pay", l: "Сдельная оплата", f: "money" }, { k: "margin", l: "После оплаты техникам", f: "money" }], d.categories) +
+    `<div class="sec">По видам работ</div>` + rtable("works", "Виды работ", [
+    { k: "name", l: "Работа", f: "text" }, { k: "category_name", l: "Группа", f: "text" }, { k: "units", l: "Единиц" }, { k: "orders", l: "Нарядов" },
+    { k: "revenue", l: "Выручка", f: "money" }, { k: "share", l: "Доля", f: "pct" }, { k: "avg_price", l: "Ср. цена ед.", f: "money" },
+    { k: "tech_pay", l: "Сдельная", f: "money" }, { k: "margin_pct", l: "Маржа", f: "pct" },
+    { k: "cycle_days", l: "Срок факт", f: "days" }, { k: "norm_days", l: "Норма", f: "days" }, { k: "on_time_pct", l: "В срок", f: "pct" }], d.rows) +
+    `<p class="small muted">Выручка по работе — с учётом скидки клиники. «Норма» — дни из прайса, «Срок факт» — в среднем от приёма до сдачи.</p>`;
+}
+function rpTechs(d, box) {
+  box.innerHTML = `<p class="small muted" style="margin-top:0">Нажмите на техника — откроется обзор только по его работам.</p>` + rtable("techs", "Техники", [
+    { k: "name", l: "Техник", f: "text" }, { k: "delivered", l: "Сдано" }, { k: "units", l: "Ед." }, { k: "revenue", l: "Выручка работ", f: "money" },
+    { k: "share", l: "Доля", f: "pct" }, { k: "tech_pay", l: "Сдельная оплата", f: "money" }, { k: "on_time_pct", l: "В срок", f: "pct" },
+    { k: "cycle_days", l: "Ср. срок", f: "days" }, { k: "fixes", l: "Коррекций" }, { k: "fix_rate", l: "Работ с коррекцией", f: "pct" },
+    { k: "active_now", l: "В работе сейчас" }, { k: "overdue_now", l: "Просрочено", html: (r) => r.overdue_now ? `<b style="color:var(--bad)">${r.overdue_now}</b>` : "0" }],
+    d.rows, { onRow: (r) => r.id ? `rpFilter('tech',${r.id})` : "" });
+}
+function rpQuality(d, box) {
+  const k = d.kpi;
+  box.innerHTML = `<div class="kpis rp-kpis">
+      ${tile("Сдано в срок", pct(k.on_time_pct), { alert: k.on_time_pct != null && k.on_time_pct < 70, sub: nn(k.delivered) + " сдано" })}
+      ${tile("Средний срок", dd(k.cycle_days), { sub: "от приёма до сдачи" })}
+      ${tile("С первого раза", pct(k.first_time_pct), { sub: "без коррекций" })}
+      ${tile("Примерок на работу", k.fittings_avg == null ? "—" : String(k.fittings_avg).replace(".", ","), { sub: "в среднем" })}
+      ${tile("Просрочено сейчас", nn(k.overdue_now), { alert: k.overdue_now > 0 })}
+      ${tile("Ждём ответа клиники", nn(k.waiting_clinic), { sub: "на примерке" })}
+      ${tile("Этапы просрочены", nn(k.stages_late_now), { alert: k.stages_late_now > 0, sub: "по дате изготовления" })}</div>
+    <div class="rp-grid">
+      <div class="card"><div class="ch-h"><b>Опоздание к сроку</b><span class="muted small">сданные работы</span></div>${colChart("late", d.late, [{ k: "n", l: "Работ", c: "--c1" }], nn)}</div>
+      <div class="card"><div class="ch-h"><b>Сколько дней делаем работу</b><span class="muted small">от приёма до сдачи</span></div>${colChart("cyc", d.cycle, [{ k: "n", l: "Работ", c: "--c1" }], nn)}</div>
+    </div>
+    <div class="sec">Просрочено сейчас</div>` + rtable("overdue", "Просрочено сейчас", [
+      { k: "number", l: "№", r: false, html: (r) => `<a href="#/o/${r.id}">${r.number}</a>` }, { k: "patient", l: "Пациент", f: "text" }, { k: "clinic_name", l: "Клиника", f: "text" },
+      { k: "tech_name", l: "Техник", f: "text" }, { k: "stage", l: "Этап", f: "text" }, { k: "due_at", l: "Срок", f: "date" },
+      { k: "late_days", l: "Опоздание", html: (r) => `<b style="color:var(--bad)">${r.late_days} дн.</b>` }, { k: "total", l: "Сумма", f: "money" }], d.overdue, { empty: "Просроченных нет 👍" }) +
+    `<div class="sec">Этапы: сколько дней в лаборатории и в клинике</div>` + rtable("stages", "Этапы", [
+      { k: "name", l: "Этап", f: "text" }, { k: "n", l: "Пройдено" }, { k: "lab_days", l: "В лаборатории", f: "days" }, { k: "clinic_days", l: "В клинике", f: "days" },
+      { k: "planned_pct", l: "С датой", f: "pct" }, { k: "plan_ok_pct", l: "В срок по дате", f: "pct" }], d.stages) +
+    `<div class="sec">Этапы, просроченные по дате изготовления</div>` + rtable("stlate", "Этапы просрочены", [
+      { k: "number", l: "№", r: false, html: (r) => `<a href="#/o/${r.id}">${r.number}</a>` }, { k: "patient", l: "Пациент", f: "text" }, { k: "name", l: "Этап", f: "text" },
+      { k: "clinic_name", l: "Клиника", f: "text" }, { k: "tech_name", l: "Техник", f: "text" }, { k: "plan_at", l: "Дата", f: "date" },
+      { k: "late_days", l: "Опоздание", html: (r) => `<b style="color:var(--bad)">${r.late_days} дн.</b>` }], d.stages_late, { empty: "Все этапы идут по датам 👍" }) +
+    `<div class="sec">Коррекции за период</div>` + rtable("fixes", "Коррекции", [
+      { k: "created_at", l: "Когда", f: "date" }, { k: "number", l: "№", r: false, html: (r) => `<a href="#/o/${r.id}">${r.number}</a>` }, { k: "patient", l: "Пациент", f: "text" },
+      { k: "clinic_name", l: "Клиника", f: "text" }, { k: "tech_name", l: "Техник", f: "text" }, { k: "text", l: "Что", f: "text" }], d.fixes_list, { empty: "Коррекций не было", limit: 10 });
+}
+function rpMoney(d, box) {
+  const k = d.kpi;
+  box.innerHTML = `<div class="kpis rp-kpis">
+      ${tile("Выручка", money(k.revenue), { delta: chg(k.revenue_prev ? Math.round((k.revenue - k.revenue_prev) * 1000 / k.revenue_prev) / 10 : null), sub: "сданные работы" })}
+      ${tile("Получено оплат", money(k.paid), { delta: chg(k.paid_prev ? Math.round((k.paid - k.paid_prev) * 1000 / k.paid_prev) / 10 : null) })}
+      ${tile("Собрано от выручки", pct(k.collect_pct), { alert: k.collect_pct != null && k.collect_pct < 80 })}
+      ${tile("Долг клиник", money(k.debt), { alert: k.debt > 0, sub: k.advance ? "авансы " + money(k.advance) : "на сегодня" })}
+      ${tile("Сдельная оплата", money(k.tech_pay), { sub: "техникам за сданные" })}
+      ${tile("После сдельной оплаты", money(k.margin), { sub: "маржа " + pct(k.margin_pct) })}
+      ${tile("Скидки клиникам", money(k.discounts), { sub: "недополучено" })}</div>
+    <div class="sec">Долги клиник и возраст долга</div>` + rtable("debts", "Долги клиник", [
+      { k: "name", l: "Клиника", f: "text" }, { k: "debt", l: "Долг", html: (r) => `<b style="color:${r.debt > 0 ? "var(--bad)" : "var(--ok)"}">${money(r.debt)}</b>` },
+      { k: "d30", l: "до 30 дн.", f: "money" }, { k: "d60", l: "31–60", f: "money" }, { k: "d90", l: "61–90", f: "money" }, { k: "d90p", l: "больше 90", html: (r) => r.d90p ? `<b style="color:var(--bad)">${money(r.d90p)}</b>` : money(0) },
+      { k: "last_pay", l: "Посл. оплата", f: "date" }, { k: "days_since_pay", l: "Дней без оплаты", f: "n" }], d.debts,
+      { onRow: (r) => `S.moneyTab='stmt';S.stmtClinic='${r.id}';go('money')`, empty: "Долгов нет" }) +
+    `<p class="small muted">Возраст долга: оплаты гасят самые старые сданные работы. Нажмите на клинику — откроется акт сверки.</p>
+    <div class="rp-grid"><div><div class="sec">Оплаты по способу</div>${hbars(d.methods, { k: "sum", sub: (r) => r.n + " опл." })}</div>
+    <div><div class="sec">Оплаты за период</div>` + rtable("pays", "Оплаты", [{ k: "paid_at", l: "Дата", f: "date" }, { k: "clinic_name", l: "Клиника", f: "text" },
+      { k: "method", l: "Способ", f: "text", html: (r) => esc(S.ref.pay_methods[r.method] || r.method) }, { k: "amount", l: "Сумма", f: "money" }], d.payments, { empty: "Оплат не было", limit: 15 }) + `</div></div>`;
+}
+function rpLoadTab(d, box) {
+  box.innerHTML = `<div class="rp-grid">
+      <div class="card"><div class="ch-h"><b>По дням недели</b><span class="muted small">за период</span></div>${colChart("wd", d.weekdays, [{ k: "received", l: "Принято", c: "--c1" }, { k: "delivered", l: "Сдано", c: "--c2" }], nn)}</div>
+      <div class="card"><div class="ch-h"><b>Сроки сдачи впереди</b><span class="muted small">активные работы</span></div>${colChart("ahead", d.ahead, [{ k: "n", l: "Работ", c: "--c1" }], nn)}</div></div>
+    <div class="rp-grid three">
+      <div><div class="sec">Откуда приходят наряды</div>${hbars(d.sources, { k: "n", fmt: nn, sub: (r) => money(r.value) })}</div>
+      <div><div class="sec">Кто создаёт наряды</div>${hbars(d.creators, { k: "n", fmt: nn })}</div>
+      <div><div class="sec">Где сейчас работы</div>${hbars(d.where, { k: "n", label: "label", fmt: nn })}
+        <p class="small muted">Срочных нарядов за период: <b>${pct(d.urgent_pct)}</b> из ${nn(d.received)}</p></div></div>`;
+  RP.tables.wd = { title: "По дням недели", cols: [{ k: "label", l: "День" }, { k: "received", l: "Принято" }, { k: "delivered", l: "Сдано" }], rows: d.weekdays };
+  RP.tables.ahead = { title: "Сроки сдачи впереди", cols: [{ k: "label", l: "Когда" }, { k: "n", l: "Работ" }, { k: "value", l: "Сумма" }], rows: d.ahead };
+  RP.tables.src = { title: "Источники нарядов", cols: [{ k: "name", l: "Источник" }, { k: "n", l: "Нарядов" }, { k: "value", l: "Сумма" }], rows: d.sources };
 }
 
 /* ---------- прайс ---------- */
